@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AuraMail Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-color: #0A0A0A;
+            --card-bg: #151515;
+            --card-border: rgba(255, 255, 255, 0.08);
+            --text-main: #FFFFFF;
+            --text-secondary: #A0A0A0;
+            --accent-blue: #4A90E2;
+            --accent-teal: #00D4AA;
+            --accent-purple: #9D4EDD;
+            --danger: #FF4B4B;
+            --success: #00C853;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        /* Animated background */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: 
+                radial-gradient(circle at 20% 50%, rgba(74, 144, 226, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(157, 78, 221, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 40% 20%, rgba(0, 212, 170, 0.08) 0%, transparent 50%);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        /* Glowing dots effect */
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                radial-gradient(2px 2px at 20% 30%, rgba(74, 144, 226, 0.3), transparent),
+                radial-gradient(2px 2px at 60% 70%, rgba(157, 78, 221, 0.3), transparent),
+                radial-gradient(1px 1px at 50% 50%, rgba(0, 212, 170, 0.2), transparent),
+                radial-gradient(1px 1px at 80% 10%, rgba(74, 144, 226, 0.2), transparent);
+            background-size: 200% 200%;
+            animation: backgroundMove 20s ease infinite;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        @keyframes backgroundMove {
+            0%, 100% { background-position: 0% 0%; }
+            50% { background-position: 100% 100%; }
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 30px 20px;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Header */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--card-border);
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            font-weight: 700;
+            color: white;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .user-email {
+            color: var(--text-secondary);
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .user-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent-teal), var(--accent-blue));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            color: white;
+        }
+
+        .btn-logout {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 14px;
+            padding: 8px 16px;
+            border-radius: 8px;
+            transition: all 0.3s;
+            border: 1px solid var(--card-border);
+        }
+
+        .btn-logout:hover {
+            color: var(--danger);
+            border-color: rgba(255, 75, 75, 0.3);
+            background: rgba(255, 75, 75, 0.1);
+        }
+
+        /* Main Grid Layout */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        /* Action Card */
+        .action-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 40px;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s;
+        }
+
+        .action-card:hover {
+            border-color: rgba(74, 144, 226, 0.3);
+            box-shadow: 0 8px 32px rgba(74, 144, 226, 0.1);
+        }
+
+        .action-card::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(0, 212, 170, 0.1) 0%, transparent 70%);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .action-card:hover::before {
+            opacity: 1;
+        }
+
+        .card-icon {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 60px;
+            height: 60px;
+            opacity: 0.1;
+            background: linear-gradient(135deg, var(--accent-teal), var(--accent-purple));
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+
+        .card-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 20px;
+        }
+
+        .btn-start-sorting {
+            width: 100%;
+            padding: 18px 32px;
+            font-size: 16px;
+            font-weight: 600;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            background: linear-gradient(135deg, var(--accent-teal), var(--accent-purple));
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+            margin-top: 20px;
+        }
+
+        .btn-start-sorting::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .btn-start-sorting:hover::before {
+            left: 100%;
+        }
+
+        .btn-start-sorting:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 212, 170, 0.3);
+        }
+
+        .btn-start-sorting:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Analytics Card */
+        .analytics-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 40px;
+            position: relative;
+        }
+
+        .chart-container {
+            position: relative;
+            width: 200px;
+            height: 200px;
+            margin: 20px auto;
+        }
+
+        .chart-center-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+        }
+
+        .chart-center-number {
+            font-size: 48px;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .chart-legend {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 30px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+        }
+
+        .legend-color.blue { background: var(--accent-blue); }
+        .legend-color.teal { background: var(--accent-teal); }
+        .legend-color.gray { background: var(--text-secondary); }
+
+        .analytics-footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--card-border);
+        }
+
+        .analytics-footer-text {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 15px;
+        }
+
+        .mini-chart {
+            height: 40px;
+            display: flex;
+            align-items: flex-end;
+            gap: 4px;
+            margin-bottom: 10px;
+        }
+
+        .mini-bar {
+            flex: 1;
+            background: linear-gradient(180deg, var(--accent-teal), var(--accent-blue));
+            border-radius: 2px 2px 0 0;
+            min-height: 4px;
+        }
+
+        .arrow-icon {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: var(--text-secondary);
+            font-size: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .arrow-icon:hover {
+            color: var(--accent-blue);
+            transform: translateX(4px);
+        }
+
+        /* Activity Log Card */
+        .activity-card {
+            grid-column: 1 / -1;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 40px;
+        }
+
+        .activity-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            margin-top: 20px;
+        }
+
+        .activity-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.02);
+            transition: all 0.3s;
+        }
+
+        .activity-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .activity-check {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent-teal), var(--accent-blue));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+            flex-shrink: 0;
+        }
+
+        .activity-text {
+            flex: 1;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .activity-text strong {
+            color: var(--text-main);
+        }
+
+        /* Progress Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            backdrop-filter: blur(10px);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            padding: 40px;
+            border-radius: 24px;
+            width: 90%;
+            max-width: 500px;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(74, 144, 226, 0.3);
+            border-radius: 50%;
+            border-top-color: var(--accent-blue);
+            margin: 0 auto 20px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            100% { transform: rotate(360deg); }
+        }
+
+        .progress-container {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            height: 10px;
+            width: 100%;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            background: linear-gradient(90deg, var(--accent-teal), var(--accent-blue));
+            height: 100%;
+            width: 0%;
+            border-radius: 10px;
+            transition: width 0.3s ease;
+        }
+
+        .progress-stats {
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+        }
+
+        .status-text {
+            color: #fff;
+            font-size: 16px;
+            margin-bottom: 5px;
+            min-height: 24px;
+        }
+
+        .detail-text {
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-family: monospace;
+        }
+
+        /* Flash Messages */
+        .alert {
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            background: rgba(255, 75, 75, 0.1);
+            border: 1px solid rgba(255, 75, 75, 0.3);
+            color: #FF4B4B;
+        }
+
+        /* Responsive */
+        @media (max-width: 968px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <div class="logo-icon">A</div>
+                <span>AuraMail</span>
+            </div>
+            <div class="user-info">
+                <div class="user-email">
+                    <div class="user-icon">{{ user_email[0].upper() }}</div>
+                    <span>{{ user_email }}</span>
+                </div>
+                <a href="/logout" class="btn-logout">Logout</a>
+            </div>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert">
+                        {{ message | safe }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="main-grid">
+            <!-- Main Action Card -->
+            <div class="action-card">
+                <div class="card-icon">📧</div>
+                <div class="card-title">AI-POWERED MAIL ORGANIZER</div>
+                <button id="startSortBtn" class="btn-start-sorting">
+                    START SMART SORTING
+                </button>
+            </div>
+
+            <!-- Analytics Card -->
+            <div class="analytics-card">
+                <div class="card-title">REAL-TIME ANALYTICS</div>
+                <div class="arrow-icon">→</div>
+                
+                <div class="chart-container">
+                    <canvas id="donutChart"></canvas>
+                    <div class="chart-center-text">
+                        <div class="chart-center-number">{{ stats.total_processed }}</div>
+                    </div>
+                </div>
+
+                <div class="chart-legend">
+                    <div class="legend-item">
+                        <div class="legend-color blue"></div>
+                        <span>Important</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color teal"></div>
+                        <span>Review ({{ stats.review }})</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color gray"></div>
+                        <span>Deleted ({{ stats.deleted }})</span>
+                    </div>
+                </div>
+
+                <div class="analytics-footer">
+                    <div class="analytics-footer-text">Emails Processed (Last 7 Days)</div>
+                    <div class="mini-chart" id="miniChart">
+                        {% if daily_stats %}
+                            {% set max_count = daily_stats.values()|max|default(1) %}
+                            {% for day in daily_stats.keys()|sort %}
+                                {% set count = daily_stats[day] %}
+                                {% set height = ((count / max_count) * 100)|round|int if max_count > 0 else 0 %}
+                                <div class="mini-bar" style="height: {{ height }}%"></div>
+                            {% endfor %}
+                        {% else %}
+                            {% for i in range(7) %}
+                                <div class="mini-bar" style="height: 0%"></div>
+                            {% endfor %}
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Activity Log Card -->
+            <div class="activity-card">
+                <div class="card-title">ACTIVITY LOG</div>
+                <div class="activity-list">
+                    {% for action in recent_activities[:5] %}
+                    <div class="activity-item">
+                        <div class="activity-check">✔</div>
+                        <div class="activity-text">
+                            {% if action.action_taken == 'DELETE' %}
+                                Classified <strong>{{ action.msg_id[:8] }}</strong> as SPAM. Action: <strong>Deleted</strong>.
+                            {% elif action.action_taken.startswith('MOVED') or action.action_taken.startswith('MOVED_TO') %}
+                                Moved <strong>{{ action.msg_id[:8] }}...</strong> to <strong>{{ action.action_taken.replace('MOVED_TO_', '').replace('MOVED_', '') }}</strong>.
+                            {% else %}
+                                Processed <strong>{{ action.msg_id[:8] }}</strong> as <strong>{{ action.ai_category }}</strong>.
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="activity-item">
+                        <div class="activity-check">!</div>
+                        <div class="activity-text">No activity yet. Start sorting to see actions here.</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Progress Modal -->
+    <div id="progressModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="spinner"></div>
+            <h2 style="margin-bottom: 10px;">AI працює...</h2>
+            
+            <div class="status-text" id="statusText">Ініціалізація...</div>
+            <div class="detail-text" id="detailText">Підготовка до з'єднання з Gmail API</div>
+
+            <div class="progress-container">
+                <div id="progressBar" class="progress-bar"></div>
+            </div>
+
+            <div class="progress-stats">
+                <span id="countText">0 / 0</span>
+                <span id="percentText">0%</span>
+            </div>
+
+            <div style="margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; text-align: left;">
+                <div style="background: rgba(255,255,255,0.05); padding: 10px; border-radius: 8px;">
+                    <small style="color: var(--text-secondary)">Оброблено</small>
+                    <div id="statProcessed" style="font-weight: bold; font-size: 18px;">0</div>
+                </div>
+                <div style="background: rgba(255,75,75,0.1); padding: 10px; border-radius: 8px;">
+                    <small style="color: #FF4B4B">Видалено</small>
+                    <div id="statDeleted" style="font-weight: bold; color: #FF4B4B; font-size: 18px;">0</div>
+                </div>
+            </div>
+            
+            <p style="margin-top: 20px; font-size: 12px; color: #666;">Будь ласка, не закривайте цю сторінку.</p>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Donut Chart
+        const ctx = document.getElementById('donutChart').getContext('2d');
+        const totalProcessed = {{ stats.total_processed }};
+        const important = {{ stats.important + stats.action_required }};
+        const review = {{ stats.review }};
+        const deleted = {{ stats.deleted }};
+
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Important', 'Review', 'Deleted'],
+                datasets: [{
+                    data: [important, review, deleted],
+                    backgroundColor: [
+                        '#4A90E2',
+                        '#00D4AA',
+                        '#A0A0A0'
+                    ],
+                    borderWidth: 0,
+                    cutout: '70%'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        enabled: false
+                    }
+                }
+            }
+        });
+
+        // Event Listeners
+        document.addEventListener('DOMContentLoaded', function() {
+            const btn = document.getElementById('startSortBtn');
+            if (btn) {
+                btn.addEventListener('click', startSorting);
+            }
+        });
+
+        function startSorting() {
+            const modal = document.getElementById('progressModal');
+            const btn = document.getElementById('startSortBtn');
+            modal.style.display = 'flex';
+            btn.disabled = true;
+
+            fetch('/sort')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'started') {
+                        console.log("Job started ID:", data.job_id);
+                        startPolling();
+                    } else {
+                        alert('Помилка запуску: ' + (data.message || 'Unknown error'));
+                        console.error('Sort job error:', data);
+                        btn.disabled = false;
+                        modal.style.display = 'none';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Помилка з\'єднання: ' + error.message);
+                    btn.disabled = false;
+                    modal.style.display = 'none';
+                });
+        }
+
+        function startPolling() {
+            const pollInterval = setInterval(() => {
+                fetch('/api/progress')
+                    .then(response => {
+                        if (response.status === 404) {
+                            return null;
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (!data || data.error) return;
+
+                        const current = data.current_message || data.current || 0;
+                        const total = data.total_messages || data.total || 0;
+                        const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+                        document.getElementById('progressBar').style.width = percent + '%';
+                        document.getElementById('percentText').innerText = percent + '%';
+                        document.getElementById('countText').innerText = `${current} / ${total}`;
+                        
+                        if (data.status) {
+                            const statusMap = {
+                                'running': 'AI працює...',
+                                'completed': 'Завершено!',
+                                'error': 'Помилка',
+                                'idle': 'Очікування...'
+                            };
+                            document.getElementById('statusText').innerText = statusMap[data.status] || data.status;
+                        }
+                        
+                        if (data.current_email_subject) {
+                            let details = data.current_email_subject;
+                            if (details.length > 50) details = details.substring(0, 50) + '...';
+                            document.getElementById('detailText').innerText = details;
+                        } else if (data.details) {
+                            let details = data.details;
+                            if (details.length > 50) details = details.substring(0, 50) + '...';
+                            document.getElementById('detailText').innerText = details;
+                        }
+
+                        if (data.statistics) {
+                            document.getElementById('statProcessed').innerText = data.statistics.total_processed || 0;
+                            document.getElementById('statDeleted').innerText = data.statistics.deleted || 0;
+                        }
+
+                        if ((data.current_message >= data.total_messages && data.total_messages > 0) ||
+                            (data.current >= data.total && data.total > 0) ||
+                            (data.status === 'completed')) {
+                            clearInterval(pollInterval);
+                            setTimeout(() => {
+                                window.location.href = '/report';
+                            }, 1000);
+                        }
+                    })
+                    .catch(err => {
+                        console.debug('Progress check failed:', err);
+                    });
+            }, 1000);
+        }
+    </script>
+</body>
+</html>

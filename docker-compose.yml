@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER:-auramail}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-auramail_password}
+      POSTGRES_DB: ${DB_NAME:-auramail}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-auramail}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://${DB_USER:-auramail}:${DB_PASSWORD:-auramail_password}@db:5432/${DB_NAME:-auramail}
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - DEBUG=${DEBUG:-False}
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    volumes:
+      - ./client_secret.json:/app/client_secret.json:ro
+
+  worker:
+    build: .
+    command: python worker.py
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://${DB_USER:-auramail}:${DB_PASSWORD:-auramail_password}@db:5432/${DB_NAME:-auramail}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    volumes:
+      - ./client_secret.json:/app/client_secret.json:ro
+
+volumes:
+  redis_data:
+  postgres_data:
+

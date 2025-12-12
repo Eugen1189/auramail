@@ -1,0 +1,18 @@
+[Unit]
+Description=AuraMail RQ Worker
+After=network.target redis.service postgresql.service
+
+[Service]
+Type=simple
+User=auramail
+Group=auramail
+WorkingDirectory=/opt/auramail
+Environment="PATH=/opt/auramail/venv/bin"
+EnvironmentFile=/etc/auramail/auramail.env
+ExecStart=/opt/auramail/venv/bin/python worker.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+

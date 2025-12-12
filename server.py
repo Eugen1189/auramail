@@ -1,0 +1,466 @@
+"""
+Flask application for AuraMail.
+Contains only Flask routes, authentication, and server startup.
+"""
+import os
+import sys
+import json
+from flask import Flask, redirect, url_for, session, request, render_template, flash, jsonify
+from google_auth_oauthlib.flow import Flow
+from google.oauth2.credentials import Credentials
+from redis import Redis
+import redis
+from rq import Queue
+from tasks import background_sort_task  # Імпортуємо нашу задачу
+
+# Fix encoding for Windows console (handle Unicode characters)
+if sys.platform == 'win32':
+    try:
+        # Set UTF-8 encoding for stdout/stderr on Windows
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(encoding='utf-8')
+            sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass  # If reconfiguration fails, continue anyway
+
+# Import configuration
+from config import (
+    CLIENT_SECRETS_FILE,
+    SCOPES,
+    BASE_URI,
+    FLASK_SECRET_KEY,
+    REDIS_URL,
+    CORS_ORIGINS,
+    ALLOW_ALL_CORS,
+    FORCE_HTTPS,
+    DEBUG,
+    CACHE_REDIS_URL,
+    CACHE_DEFAULT_TIMEOUT,
+    CACHE_DASHBOARD_STATS_TIMEOUT,
+    CACHE_ACTION_HISTORY_TIMEOUT
+)
+
+# Import utility modules
+from utils.gmail_api import build_google_services, rollback_action
+from utils.db_logger import (
+    get_log_entry,
+    get_action_history,
+    get_daily_stats,
+    get_progress,
+    get_latest_report
+)
+
+# Import database
+from database import db, init_db
+
+# Import caching
+from flask_caching import Cache
+
+# Initialize Flask application
+app = Flask(__name__)
+app.secret_key = FLASK_SECRET_KEY  # REQUIRED for session to work
+app.config['DEBUG'] = DEBUG
+
+# Initialize database with connection pooling
+init_db(app)
+
+# Initialize cache with Redis
+cache = Cache(app, config={
+    'CACHE_TYPE': 'RedisCache',
+    'CACHE_REDIS_URL': CACHE_REDIS_URL,
+    'CACHE_DEFAULT_TIMEOUT': CACHE_DEFAULT_TIMEOUT
+})
+
+# Security: CORS Configuration
+from flask_cors import CORS
+if ALLOW_ALL_CORS:
+    # WARNING: Only for development! Never use in production
+    CORS(app)
+    if not DEBUG:
+        import warnings
+        warnings.warn("ALLOW_ALL_CORS is True but DEBUG is False. This is unsafe for production!")
+else:
+    # Production: Only allow specific origins
+    if CORS_ORIGINS:
+        CORS(app, resources={
+            r"/api/*": {"origins": CORS_ORIGINS},
+            r"/sort": {"origins": CORS_ORIGINS},
+            r"/callback": {"origins": CORS_ORIGINS}
+        })
+    # If no CORS_ORIGINS set, no CORS headers will be sent (most secure)
+
+# Security: HTTP Headers Protection
+from flask_talisman import Talisman
+Talisman(app,
+    force_https=FORCE_HTTPS if not DEBUG else False,  # Don't force HTTPS in debug mode (localhost)
+    content_security_policy={
+        'default-src': ["'self'"],
+        'script-src': ["'self'", 'https://apis.google.com', 'https://cdn.jsdelivr.net', "'unsafe-inline'", "'unsafe-hashes'"],  # Allow inline scripts and event handlers
+        'style-src': ["'self'", 'https://fonts.googleapis.com', "'unsafe-inline'"],
+        'font-src': ["'self'", 'https://fonts.gstatic.com'],
+        'img-src': ["'self'", 'data:', 'https:'],
+        'connect-src': ["'self'", 'https://www.googleapis.com', 'https://*.googleapis.com', 'https://cdn.jsdelivr.net']  # Allow CDN connections for source maps
+    },
+    content_security_policy_nonce_in=[],  # Disable nonce requirement
+    frame_options='DENY',  # Prevent clickjacking
+    strict_transport_security=True,
+    strict_transport_security_max_age=31536000,  # 1 year
+    strict_transport_security_include_subdomains=True
+)
+
+
+# --- HELPER FUNCTIONS ---
+def create_flow():
+    """
+    Creates new Flow object for each request.
+    Uses BASE_URI from config to form redirect_uri.
+    """
+    redirect_uri = f"{BASE_URI.rstrip('/')}/callback"
+    return Flow.from_client_secrets_file(
+        CLIENT_SECRETS_FILE,
+        scopes=SCOPES,
+        redirect_uri=redirect_uri
+    )
+
+
+def get_user_credentials():
+    """Get credentials from session."""
+    if 'credentials' not in session:
+        return None
+    credentials_json = session['credentials']
+    return Credentials.from_authorized_user_info(json.loads(credentials_json), SCOPES)
+
+
+def calculate_stats():
+    """Calculate statistics from action history."""
+    all_actions = get_action_history(limit=1000)
+    return {
+        'total_processed': len(all_actions),
+        'important': sum(1 for a in all_actions if a.get('ai_category') == 'IMPORTANT'),
+        'review': sum(1 for a in all_actions if a.get('ai_category') == 'REVIEW'),
+        'deleted': sum(1 for a in all_actions if a.get('action_taken') == 'DELETE'),
+        'action_required': sum(1 for a in all_actions if a.get('ai_category') == 'ACTION_REQUIRED'),
+        'newsletter': sum(1 for a in all_actions if a.get('ai_category') == 'NEWSLETTER'),
+        'social': sum(1 for a in all_actions if a.get('ai_category') == 'SOCIAL'),
+        'errors': sum(1 for a in all_actions if a.get('status', '').startswith('ERROR'))
+    }
+
+
+def get_empty_stats():
+    """Return empty statistics dictionary."""
+    return {
+        'total_processed': 0,
+        'important': 0,
+        'action_required': 0,
+        'newsletter': 0,
+        'social': 0,
+        'review': 0,
+        'deleted': 0,
+        'errors': 0
+    }
+
+
+def build_label_cache(service):
+    """Build label cache from Gmail service."""
+    label_cache = {}
+    try:
+        response = service.users().labels().list(userId='me').execute()
+        for label in response.get('labels', []):
+            label_cache[label['name']] = label['id']
+    except Exception:
+        pass  # Return empty cache if fails
+    return label_cache
+
+
+# --- 1. AUTHENTICATION ROUTE ---
+@app.route('/authorize')
+def authorize():
+    """Redirect user to Google OAuth authorization page."""
+    try:
+        flow = create_flow()
+        authorization_url, state = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true',
+            prompt='consent'
+        )
+        session['oauth_state'] = state
+        return redirect(authorization_url)
+    except Exception as e:
+        import traceback
+        return f'<h1>❌ Помилка при авторизації</h1><p>Деталі: {str(e)}</p><pre>{traceback.format_exc()}</pre><p><a href="/">Повернутися на головну</a></p>', 500
+
+
+# --- 2. TOKEN PROCESSING ROUTE ---
+@app.route('/callback')
+def callback():
+    """Process OAuth callback and save credentials."""
+    try:
+        # Check for error in request parameters
+        error = request.args.get('error')
+        if error:
+            error_description = request.args.get('error_description', 'Невідома помилка')
+            return f'<h1>❌ Помилка OAuth</h1><p><strong>Помилка:</strong> {error}</p><p><strong>Опис:</strong> {error_description}</p><p><a href="/authorize">Спробувати знову</a></p>', 400
+        
+        # Check state for CSRF protection
+        state = request.args.get('state')
+        if 'oauth_state' not in session or state != session.get('oauth_state'):
+            return '<h1>❌ Помилка безпеки</h1><p>State параметр не збігається. Будь ласка, <a href="/authorize">спробуйте знову</a>.</p>', 400
+        
+        # Process return from Google and save token
+        flow = create_flow()
+        flow.fetch_token(authorization_response=request.url)
+        credentials = flow.credentials
+        
+        # Save token in session
+        session['credentials'] = credentials.to_json()
+        
+        # Verify scopes are granted
+        if credentials.scopes:
+            granted_set = set(credentials.scopes)
+            required_set = set(SCOPES)
+            if not required_set.issubset(granted_set):
+                missing = required_set - granted_set
+                flash(f"⚠️ Попередження: Відсутні дозволи: {', '.join(sorted(missing))}", 'warning')
+        
+        # Remove state after successful authorization
+        session.pop('oauth_state', None)
+        return redirect(url_for('index'))
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return f'<h1>❌ Помилка при обробці токена</h1><p>Деталі: {str(e)}</p><pre>{error_details}</pre><p><a href="/">Повернутися на головну</a></p>', 500
+
+
+# --- 3. MAIN ROUTE (Home page) ---
+@app.route('/')
+@cache.cached(timeout=CACHE_DASHBOARD_STATS_TIMEOUT, key_prefix='dashboard_index')
+def index():
+    if 'credentials' not in session:
+        return render_template('login.html')
+    
+    # User is authenticated, show dashboard
+    try:
+        creds = get_user_credentials()
+        service, _ = build_google_services(creds)
+        
+        # Get user profile to extract email
+        profile = service.users().getProfile(userId='me').execute()
+        user_email = profile.get('emailAddress', 'Unknown')
+        
+        # Get recent activities (last 10)
+        recent_activities = get_action_history(limit=10)
+        recent_activities.reverse()  # Show newest first
+        
+        # Calculate stats from log
+        stats = calculate_stats()
+        
+        # Get daily stats for last 7 days
+        daily_stats = get_daily_stats(days=7)
+        
+        return render_template('dashboard.html', 
+                             user_email=user_email,
+                             recent_activities=recent_activities,
+                             stats=stats,
+                             daily_stats=daily_stats)
+    except Exception as e:
+        # Fallback if there's an error
+        return f'<h1>❌ Помилка</h1><p>Деталі: {str(e)}</p><p><a href="/">Повернутися на головну</a></p>', 500
+
+
+# --- 4. ОНОВЛЕНИЙ МАРШРУТ ЗАПУСКУ (тепер миттєвий) ---
+@app.route('/sort')
+def start_sort_job():
+    if 'credentials' not in session:
+        return jsonify({'status': 'error', 'message': 'Not authorized'}), 401
+    
+    try:
+        # Підключаємось до Redis
+        redis_conn = Redis.from_url(REDIS_URL)
+        
+        # Test connection
+        redis_conn.ping()
+        
+        q = Queue(connection=redis_conn)
+        
+        # Ставимо задачу в чергу!
+        # Використовуємо обгортку з Flask app context для доступу до БД
+        from tasks import run_task_in_context
+        job = q.enqueue(run_task_in_context, background_sort_task, session['credentials'])
+        
+        return jsonify({
+            'status': 'started', 
+            'job_id': job.get_id(),
+            'message': 'Job enqueued successfully'
+        })
+    except redis.ConnectionError as e:
+        import traceback
+        error_msg = f"Redis connection error: {str(e)}. Make sure Redis is running on {REDIS_URL}"
+        print(f"❌ {error_msg}")
+        traceback.print_exc()
+        return jsonify({
+            'status': 'error', 
+            'message': error_msg
+        }), 500
+    except Exception as e:
+        import traceback
+        error_msg = f"Error starting job: {str(e)}"
+        print(f"❌ {error_msg}")
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': error_msg}), 500
+
+
+# --- 4b. НОВИЙ МАРШРУТ ДЛЯ ЗВІТУ ---
+@app.route('/report')
+@cache.cached(timeout=CACHE_ACTION_HISTORY_TIMEOUT, key_prefix='report_page')
+def show_report():
+    # Завантажуємо статистику з бази даних
+    try:
+        stats = get_latest_report()
+            
+        recent_actions = get_action_history(limit=20)
+        log_data = get_action_history(limit=100)
+        
+        from config import is_production_ready
+        
+        return render_template('report.html', 
+                             stats=stats, 
+                             recent_actions=recent_actions, 
+                             log_data=log_data,
+                             is_prod_secure=is_production_ready())
+    except Exception as e:
+        return f'<h1>❌ Помилка звіту</h1><p>{str(e)}</p><p><a href="/">Повернутися на головну</a></p>', 500
+
+
+# --- 5. PROGRESS API ENDPOINT (NEW) ---
+@app.route('/api/progress')
+@cache.cached(timeout=5, key_prefix='api_progress')  # Cache for 5 seconds (progress updates frequently)
+def api_progress():
+    """Returns current processing progress as JSON."""
+    try:
+        progress_data = get_progress()
+        if progress_data is None:
+            return jsonify({'error': 'No progress data available'}), 404
+        return jsonify(progress_data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# --- 6. ROLLBACK ROUTE ---
+@app.route('/rollback/<string:msg_id>', methods=['POST'])
+def rollback(msg_id):
+    """Rollback action for a specific email message."""
+    if 'credentials' not in session:
+        flash("Помилка: потрібна авторизація.", 'danger')
+        return redirect(url_for('authorize'))
+    
+    try:
+        # 1. Initialize Gmail service and label cache
+        creds = get_user_credentials()
+        if not creds:
+            flash("Помилка: потрібна авторизація.", 'danger')
+            return redirect(url_for('authorize'))
+        
+        gmail_service, _ = build_google_services(creds)
+        
+        # Initialize label cache
+        label_cache = build_label_cache(gmail_service)
+        if not label_cache:
+            flash("Помилка: не вдалося завантажити кеш міток.", 'danger')
+            return redirect(url_for('show_report'))
+        
+        # 2. Find log entry
+        log_entry = get_log_entry(msg_id)
+        if not log_entry:
+            flash("Помилка: запис про дію для цього листа не знайдено в журналі.", 'warning')
+            return redirect(url_for('show_report'))
+        
+        # 3. Execute rollback
+        status = rollback_action(gmail_service, log_entry, label_cache)
+        
+        if "ERROR" in status:
+            flash(f"Помилка відкату: {status} (Не можна відмінити DELETE).", 'danger')
+        elif "INFO" in status:
+            flash(f"Інформація: {status}", 'info')
+        else:
+            flash(f"Відкат успішний: {status}.", 'success')
+        
+        # Invalidate cache after rollback
+        from utils.cache_helper import invalidate_stats_cache
+        invalidate_stats_cache()
+        
+        return redirect(url_for('show_report'))
+        
+    except Exception as e:
+        flash(f"Помилка при виконанні відкату: {str(e)}", 'danger')
+        return redirect(url_for('show_report'))
+
+
+# --- 7. LOGOUT ROUTE ---
+@app.route('/logout')
+def logout():
+    """Logout user by clearing session."""
+    session.clear()
+    flash("Ви успішно вийшли з системи. Credentials очищено.", 'info')
+    return redirect(url_for('index'))
+
+
+# --- 8. CLEAR CREDENTIALS ROUTE (for fixing OAuth scopes) ---
+@app.route('/clear-credentials')
+def clear_credentials():
+    """Clear OAuth credentials from session. Use this if you get 'insufficient authentication scopes' error."""
+    session.clear()
+    flash("Credentials очищено. Будь ласка, авторизуйтеся знову з правильними дозволами.", 'warning')
+    return redirect(url_for('authorize'))
+
+
+if __name__ == '__main__':
+    # Rename your downloaded key file to 'client_secret.json'
+    # and place it in the project folder.
+    if not os.path.exists(CLIENT_SECRETS_FILE):
+        print(f"Помилка: Файл '{CLIENT_SECRETS_FILE}' не знайдено.")
+        print("Переконайтеся, що ви перейменували свій файл Google Cloud.")
+    else:
+        # Check JSON file validity
+        try:
+            with open(CLIENT_SECRETS_FILE, 'r', encoding='utf-8') as f:
+                json.load(f)
+            print("✅ client_secret.json валідний")
+        except json.JSONDecodeError as e:
+            print(f"❌ Помилка: client_secret.json містить невалідний JSON: {e}")
+            print("Переконайтеся, що файл не містить коментарів або синтаксичних помилок.")
+            exit(1)
+        except Exception as e:
+            print(f"❌ Помилка при читанні client_secret.json: {e}")
+            exit(1)
+        
+        # Check for pyOpenSSL for SSL (only in development)
+        if DEBUG:
+            try:
+                import OpenSSL
+                print("✅ pyOpenSSL встановлено. Запускаємо сервер з HTTPS (dev mode)...")
+                print("🌐 Сервер запускається на: https://127.0.0.1:5000")
+                print("⚠️  Це режим розробки! Для продакшену використовуйте Gunicorn + Nginx")
+                # Flask runs on port 5000 (development only)
+                app.run(host='127.0.0.1', port=5000, ssl_context='adhoc', debug=DEBUG)
+            except ImportError:
+                print("❌ Помилка: pyOpenSSL не встановлено!")
+                print("Встановіть його командою: pip install pyopenssl")
+                print("\nАбо запустіть без SSL (не рекомендується для OAuth):")
+                print("Закоментуйте рядок з ssl_context='adhoc' та використайте app.run(host='127.0.0.1', port=5000)")
+        else:
+            # Production mode - but allow running with warning for development/testing
+            print("⚠️  Production mode (DEBUG=False) detected!")
+            print("⚠️  Flask dev server is NOT recommended for production!")
+            print("   For production, use: gunicorn -w 4 -b 0.0.0.0:5000 server:app")
+            print("\n   Starting dev server anyway for development/testing...")
+            print("   🌐 Server will run on: https://127.0.0.1:5000")
+            
+            # Still use adhoc SSL for OAuth to work
+            try:
+                import OpenSSL
+                app.run(host='127.0.0.1', port=5000, ssl_context='adhoc', debug=False)
+            except ImportError:
+                print("❌ Помилка: pyOpenSSL не встановлено!")
+                print("Встановіть його командою: pip install pyopenssl")
+            # Alternative without SSL (won't work with OAuth, but for testing):
+            # app.run(host='127.0.0.1', port=5000)
