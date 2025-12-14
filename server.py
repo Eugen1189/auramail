@@ -5,13 +5,13 @@ Contains only Flask routes, authentication, and server startup.
 import os
 import sys
 import json
-from flask import Flask, redirect, url_for, session, request, render_template, flash, jsonify
+from flask import redirect, url_for, session, request, render_template, flash, jsonify
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 from redis import Redis
 import redis
 from rq import Queue
-from tasks import background_sort_task  # Імпортуємо нашу задачу
+from tasks import background_sort_task, voice_search_task  # Імпортуємо задачі для RQ
 
 # Fix encoding for Windows console (handle Unicode characters)
 if sys.platform == 'win32':
@@ -51,62 +51,39 @@ from utils.db_logger import (
 )
 
 # Import database
-from database import db, init_db
+from database import db
 
-# Import caching
-from flask_caching import Cache
+# Import app factory
+from app_factory import create_app
 
-# Initialize Flask application
-app = Flask(__name__)
-app.secret_key = FLASK_SECRET_KEY  # REQUIRED for session to work
-app.config['DEBUG'] = DEBUG
+# Import monitoring and logging
+from utils.monitoring import metrics_endpoint, track_api_request
+from utils.logging_config import get_logger
 
-# Initialize database with connection pooling
-init_db(app)
+# Create Flask application using factory
+app = create_app()
 
-# Initialize cache with Redis
-cache = Cache(app, config={
-    'CACHE_TYPE': 'RedisCache',
-    'CACHE_REDIS_URL': CACHE_REDIS_URL,
-    'CACHE_DEFAULT_TIMEOUT': CACHE_DEFAULT_TIMEOUT
-})
+# Ensure cache is properly configured for testing
+# app_factory should have already set CACHE_TYPE='NullCache' if TESTING=True
+# This is a safety check to ensure cache configuration is correct
+if app.config.get('TESTING', False) and app.config.get('CACHE_TYPE') != 'NullCache':
+    # Reconfigure cache to NullCache if not already set
+    app.config['CACHE_TYPE'] = 'NullCache'
+    app.cache.init_app(app, config={
+        'CACHE_TYPE': 'NullCache',
+        'CACHE_NO_NULL_WARNING': True
+    })
 
-# Security: CORS Configuration
-from flask_cors import CORS
-if ALLOW_ALL_CORS:
-    # WARNING: Only for development! Never use in production
-    CORS(app)
-    if not DEBUG:
-        import warnings
-        warnings.warn("ALLOW_ALL_CORS is True but DEBUG is False. This is unsafe for production!")
-else:
-    # Production: Only allow specific origins
-    if CORS_ORIGINS:
-        CORS(app, resources={
-            r"/api/*": {"origins": CORS_ORIGINS},
-            r"/sort": {"origins": CORS_ORIGINS},
-            r"/callback": {"origins": CORS_ORIGINS}
-        })
-    # If no CORS_ORIGINS set, no CORS headers will be sent (most secure)
+# Get cache instance from app
+cache = app.cache
 
-# Security: HTTP Headers Protection
-from flask_talisman import Talisman
-Talisman(app,
-    force_https=FORCE_HTTPS if not DEBUG else False,  # Don't force HTTPS in debug mode (localhost)
-    content_security_policy={
-        'default-src': ["'self'"],
-        'script-src': ["'self'", 'https://apis.google.com', 'https://cdn.jsdelivr.net', "'unsafe-inline'", "'unsafe-hashes'"],  # Allow inline scripts and event handlers
-        'style-src': ["'self'", 'https://fonts.googleapis.com', "'unsafe-inline'"],
-        'font-src': ["'self'", 'https://fonts.gstatic.com'],
-        'img-src': ["'self'", 'data:', 'https:'],
-        'connect-src': ["'self'", 'https://www.googleapis.com', 'https://*.googleapis.com', 'https://cdn.jsdelivr.net']  # Allow CDN connections for source maps
-    },
-    content_security_policy_nonce_in=[],  # Disable nonce requirement
-    frame_options='DENY',  # Prevent clickjacking
-    strict_transport_security=True,
-    strict_transport_security_max_age=31536000,  # 1 year
-    strict_transport_security_include_subdomains=True
-)
+# Initialize structured logging
+logger = get_logger(__name__)
+app_logger = get_logger(__name__)
+
+
+# CORS and Talisman are configured in app_factory.create_app()
+# Cache is configured in app_factory.create_app() with NullCache for testing
 
 
 # --- HELPER FUNCTIONS ---
@@ -138,7 +115,7 @@ def calculate_stats():
         'total_processed': len(all_actions),
         'important': sum(1 for a in all_actions if a.get('ai_category') == 'IMPORTANT'),
         'review': sum(1 for a in all_actions if a.get('ai_category') == 'REVIEW'),
-        'deleted': sum(1 for a in all_actions if a.get('action_taken') == 'DELETE'),
+        'archived': sum(1 for a in all_actions if a.get('action_taken') == 'ARCHIVE'),
         'action_required': sum(1 for a in all_actions if a.get('ai_category') == 'ACTION_REQUIRED'),
         'newsletter': sum(1 for a in all_actions if a.get('ai_category') == 'NEWSLETTER'),
         'social': sum(1 for a in all_actions if a.get('ai_category') == 'SOCIAL'),
@@ -155,7 +132,7 @@ def get_empty_stats():
         'newsletter': 0,
         'social': 0,
         'review': 0,
-        'deleted': 0,
+        'archived': 0,
         'errors': 0
     }
 
@@ -177,6 +154,10 @@ def build_label_cache(service):
 def authorize():
     """Redirect user to Google OAuth authorization page."""
     try:
+        # Make session permanent before saving state
+        # This ensures session persists during OAuth redirect
+        session.permanent = True
+        
         flow = create_flow()
         authorization_url, state = flow.authorization_url(
             access_type='offline',
@@ -210,6 +191,10 @@ def callback():
         flow = create_flow()
         flow.fetch_token(authorization_response=request.url)
         credentials = flow.credentials
+        
+        # Make session permanent before saving credentials
+        # This ensures session persists across requests
+        session.permanent = True
         
         # Save token in session
         session['credentials'] = credentials.to_json()
@@ -282,10 +267,9 @@ def start_sort_job():
         
         q = Queue(connection=redis_conn)
         
-        # Ставимо задачу в чергу!
-        # Використовуємо обгортку з Flask app context для доступу до БД
-        from tasks import run_task_in_context
-        job = q.enqueue(run_task_in_context, background_sort_task, session['credentials'])
+        # Ставимо задачу в чергу напряму
+        # Worker will create Flask app context automatically via wrapper
+        job = q.enqueue(background_sort_task, session['credentials'])
         
         return jsonify({
             'status': 'started', 
@@ -409,8 +393,98 @@ def logout():
 def clear_credentials():
     """Clear OAuth credentials from session. Use this if you get 'insufficient authentication scopes' error."""
     session.clear()
+    app_logger.info("credentials_cleared", action="clear_credentials")
     flash("Credentials очищено. Будь ласка, авторизуйтеся знову з правильними дозволами.", 'warning')
     return redirect(url_for('authorize'))
+
+
+# --- 9. PROMETHEUS METRICS ENDPOINT ---
+@app.route('/metrics')
+def metrics():
+    """Prometheus metrics endpoint."""
+    return metrics_endpoint()
+
+
+# --- VOICE SEARCH ENDPOINT ---
+@app.route('/voice/search', methods=['POST'])
+def handle_voice_search():
+    """Handle voice search request and enqueue task to RQ."""
+    if 'credentials' not in session:
+        return jsonify({'status': 'error', 'message': 'Not authorized'}), 401
+    
+    try:
+        # Get search query from request
+        data = request.get_json()
+        if not data or 'query' not in data:
+            return jsonify({'status': 'error', 'message': 'Missing query parameter'}), 400
+        
+        search_text = data.get('query', '').strip()
+        if not search_text:
+            return jsonify({'status': 'error', 'message': 'Query cannot be empty'}), 400
+        
+        # Connect to Redis
+        redis_conn = Redis.from_url(REDIS_URL)
+        redis_conn.ping()
+        
+        q = Queue(connection=redis_conn)
+        
+        # Enqueue voice search task напряму
+        # Worker will create Flask app context automatically via wrapper
+        job = q.enqueue(voice_search_task, session['credentials'], search_text)
+        
+        return jsonify({
+            'status': 'started',
+            'job_id': job.get_id(),
+            'message': 'Voice search task enqueued successfully'
+        }), 202
+        
+    except Exception as e:
+        error_msg = str(e)
+        print(f"❌ [Voice Search] Error enqueueing task: {error_msg}")
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to start voice search: {error_msg}'
+        }), 500
+
+
+# Add middleware to track API requests and ensure session is permanent
+@app.before_request
+def before_request():
+    """Track API request start time and ensure session is permanent."""
+    from flask import g
+    import time
+    g.start_time = time.time()
+    
+    # Ensure session is permanent for all requests
+    # This is critical for OAuth callback to work correctly
+    session.permanent = True
+
+
+@app.after_request
+def after_request(response):
+    """Track API request metrics after response."""
+    from flask import g, request
+    import time
+    
+    if hasattr(g, 'start_time'):
+        duration = time.time() - g.start_time
+        track_api_request(
+            endpoint=request.endpoint or request.path,
+            method=request.method,
+            status_code=response.status_code,
+            duration=duration
+        )
+        
+        # Log request
+        app_logger.info(
+            "api_request",
+            method=request.method,
+            path=request.path,
+            status_code=response.status_code,
+            duration=duration
+        )
+    
+    return response
 
 
 if __name__ == '__main__':

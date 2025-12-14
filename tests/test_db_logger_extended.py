@@ -48,7 +48,7 @@ class TestProgressTracking:
             final_stats = {
                 'total_processed': 100,
                 'important': 20,
-                'deleted': 10
+                'archived': 10
             }
             complete_progress(final_stats)
             
@@ -177,7 +177,7 @@ class TestReportFunctions:
                 'newsletter': 30,
                 'social': 10,
                 'review': 10,
-                'deleted': 10,
+                'archived': 10,
                 'errors': 0
             }
             
@@ -188,7 +188,7 @@ class TestReportFunctions:
             assert report is not None
             assert report['total_processed'] == 100
             assert report['important'] == 25
-            assert report['deleted'] == 10
+            assert report['archived'] == 10
     
     def test_get_latest_report_returns_most_recent(self, app):
         """Test that get_latest_report returns the most recent report."""
@@ -197,10 +197,10 @@ class TestReportFunctions:
         with app.app_context():
             # Create two reports
             save_report({'total_processed': 50, 'important': 10, 'action_required': 5,
-                        'newsletter': 20, 'social': 5, 'review': 5, 'deleted': 5, 'errors': 0})
+                        'newsletter': 20, 'social': 5, 'review': 5, 'archived': 5, 'errors': 0})
             
             save_report({'total_processed': 100, 'important': 25, 'action_required': 15,
-                        'newsletter': 30, 'social': 10, 'review': 10, 'deleted': 10, 'errors': 0})
+                        'newsletter': 30, 'social': 10, 'review': 10, 'archived': 10, 'errors': 0})
             
             report = get_latest_report()
             

@@ -178,3 +178,4 @@ sudo journalctl -u auramail-worker.service -f
    - Verify .env file exists and has correct values
    - Ensure database is accessible
 
+

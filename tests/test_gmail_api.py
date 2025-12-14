@@ -147,20 +147,23 @@ class TestProcessMessageAction:
         
         classification = {
             'category': 'SPAM',
-            'action': 'DELETE'
+            'action': 'DELETE'  # Legacy DELETE action
         }
         
-        # Setup mock chaining for delete
-        mock_delete = MagicMock()
-        mock_delete_execute = MagicMock()
-        mock_delete_execute.return_value = {}
-        mock_delete.return_value = mock_delete_execute
-        mock_service.users.return_value.messages.return_value.delete = mock_delete
+        # Setup mock for modify (archive operation)
+        mock_modify = mock_service.users.return_value.messages.return_value.modify
+        mock_modify.return_value.execute.return_value = None
         
         result = process_message_action(mock_service, 'test-msg-id', classification, label_cache)
         
-        assert 'DELETED' in result
-        mock_delete.assert_called_once()
+        # DELETE action is automatically converted to ARCHIVE (we preserve all emails)
+        assert 'ARCHIVED' in result
+        # Should archive (remove INBOX label), not delete
+        mock_modify.assert_called_once_with(
+            userId='me',
+            id='test-msg-id',
+            body={'removeLabelIds': ['INBOX']}
+        )
     
     def test_process_message_action_archive(self):
         """Test that process_message_action archives message."""
@@ -315,18 +318,23 @@ class TestRollbackAction:
             assert 'SUCCESS' in result.upper() or 'RESTORED' in result.upper() or 'INBOX' in result.upper()
             mock_modify_callable.assert_called()
     
-    def test_rollback_action_handles_delete(self):
-        """Test that rollback_action cannot reverse DELETE."""
+    def test_rollback_action_converts_delete_to_archive(self):
+        """Test that legacy DELETE action is converted to ARCHIVE for rollback."""
         mock_service = MagicMock()
+        mock_modify = mock_service.users.return_value.messages.return_value.modify
+        mock_modify.return_value.execute.return_value = None
+        
         label_cache = {}
         
         log_entry = {
             'msg_id': 'test-msg-id',
-            'action_taken': 'DELETED',
+            'action_taken': 'DELETED',  # Legacy DELETE (will be converted to ARCHIVE for rollback)
             'ai_category': 'SPAM'
         }
         
         result = rollback_action(mock_service, log_entry, label_cache)
         
-        assert 'ERROR' in result.upper() or 'CANNOT' in result.upper() or 'DELETE' in result.upper()
+        # Legacy DELETE is converted to ARCHIVE, so rollback should work (restore to INBOX)
+        assert 'Successfully restored' in result or 'INBOX added' in result
+        mock_modify.assert_called_once()
 

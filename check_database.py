@@ -34,3 +34,4 @@ with app.app_context():
         print(f'   Оброблено листів: {latest_report.total_processed}')
         print(f'   Важливих: {latest_report.important}, Видалено: {latest_report.deleted}')
 
+

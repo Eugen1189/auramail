@@ -25,3 +25,4 @@ EXPOSE 5000
 # Default command (override in docker-compose or deployment)
 CMD ["python", "server.py"]
 
+

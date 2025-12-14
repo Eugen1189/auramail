@@ -5,7 +5,7 @@ Handles all Gmail interaction logic (reading, labels, moving, deleting).
 import json
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
-from config import SCOPES
+from config import SCOPES, LABEL_COLOR_MAP
 
 
 def build_google_services(creds):
@@ -92,7 +92,7 @@ def get_message_content(service, msg_id):
         return f"Error reading message {msg_id}: {e}", "Error"
 
 
-def get_or_create_label_id(service, label_name, label_cache):
+def get_or_create_label_id(service, label_name, label_cache, category=None):
     """
     Checks if label exists and returns its ID. If not — creates it.
     Uses cache for quick access without repeated API requests.
@@ -101,6 +101,7 @@ def get_or_create_label_id(service, label_name, label_cache):
         service: Initialized Gmail API service object
         label_name: Label name
         label_cache: Dictionary for storing label IDs {"Label Name": "Label ID"}
+        category: Optional category name for color mapping (e.g., 'IMPORTANT', 'BILLS_INVOICES')
     
     Returns:
         Label ID (string)
@@ -126,14 +127,60 @@ def get_or_create_label_id(service, label_name, label_cache):
         'messageListVisibility': 'show'
     }
     
-    # Add color for AI labels
+    # Add color for AI labels based on category
+    # Try to set color, but if it fails, create label without color
+    color_added = False
     if label_name.startswith('AI_'):
-        label_body['color'] = {
-            'textColor': '#ffffff',
-            'backgroundColor': '#4d96b9'  # Blue for AI
-        }
+        # Determine category: use provided category or extract from label name
+        detected_category = None
+        
+        if category:
+            # Use provided category if available
+            detected_category = category.upper() if category else None
+        else:
+            # Try to match label name to category
+            # Format: AI_CATEGORY_NAME or AI_BILLS, AI_IMPORTANT, etc.
+            label_upper = label_name.upper()
+            for cat in LABEL_COLOR_MAP.keys():
+                if cat != 'DEFAULT' and cat in label_upper:
+                    detected_category = cat
+                    break
+        
+        # Use category color or default
+        # Gmail API uses color names (strings), not HEX codes
+        bg_color = LABEL_COLOR_MAP.get(detected_category, LABEL_COLOR_MAP['DEFAULT'])
+        
+        # Set text color - Gmail API requires both textColor and backgroundColor
+        # Try using standard color names first
+        text_color = 'white'
+        
+        # Both textColor and backgroundColor are required when setting color
+        # Gmail API expects color names as strings (e.g., "blue", "red", "white")
+        if bg_color:
+            label_body['color'] = {
+                'textColor': text_color,
+                'backgroundColor': bg_color
+            }
+            color_added = True
     
-    created_label = service.users().labels().create(userId='me', body=label_body).execute()
+    # Try to create label with color, if that fails, create without color
+    try:
+        created_label = service.users().labels().create(userId='me', body=label_body).execute()
+    except Exception as color_error:
+        # If color setting fails, try creating label without color
+        if color_added and 'color' in str(color_error).lower():
+            print(f"⚠️ Warning: Failed to create label '{label_name}' with color. Trying without color...")
+            # Remove color and try again
+            label_body.pop('color', None)
+            try:
+                created_label = service.users().labels().create(userId='me', body=label_body).execute()
+                print(f"✅ Label '{label_name}' created successfully without color")
+            except Exception as e:
+                # If it still fails, raise the original error
+                raise color_error
+        else:
+            # Re-raise if it's not a color-related error
+            raise
     
     # Save to cache
     label_cache[label_name] = created_label['id']
@@ -142,7 +189,8 @@ def get_or_create_label_id(service, label_name, label_cache):
 
 def process_message_action(service, msg_id, classification_data, label_cache):
     """
-    Executes action (MOVE, ARCHIVE, DELETE) on email based on classification.
+    Executes action (MOVE, ARCHIVE) on email based on classification.
+    Note: DELETE action is no longer supported. All emails are preserved in All Mail.
     
     Args:
         service: Initialized Gmail API service object
@@ -154,26 +202,21 @@ def process_message_action(service, msg_id, classification_data, label_cache):
         String with action execution status
     """
     action = classification_data.get('action')
-    label_name = classification_data.get('label_name')  # May be None for DELETE
+    label_name = classification_data.get('label_name')  # May be None for ARCHIVE
     
     try:
+        # Legacy DELETE action support: convert to ARCHIVE to preserve data
         if action == "DELETE":
-            # DELETE action: Delete email permanently
-            try:
-                service.users().messages().delete(userId='me', id=msg_id).execute()
-                return "DELETED"
-            except Exception as delete_error:
-                error_str = str(delete_error)
-                if "insufficient authentication scopes" in error_str.lower() or "insufficientpermissions" in error_str.lower():
-                    return "ERROR: Insufficient permissions for DELETE. Please re-authorize at /clear-credentials and authorize again."
-                raise  # Re-raise if it's a different error
-            
-        elif action == "MOVE":
+            action = "ARCHIVE"
+        
+        if action == "MOVE":
             # MOVE action: Add new label and remove from INBOX
             if not label_name:
                 raise ValueError("label_name обов'язковий для дії MOVE")
             
-            label_id = get_or_create_label_id(service, label_name, label_cache)
+            # Pass category from classification_data for better color mapping
+            category = classification_data.get('category')
+            label_id = get_or_create_label_id(service, label_name, label_cache, category=category)
             
             modification = {
                 'addLabelIds': [label_id],
@@ -333,9 +376,9 @@ def rollback_action(gmail_service, log_entry: dict, label_cache: dict) -> str:
     if not msg_id:
         return "ERROR: Message ID not found in log entry."
     
+    # Legacy DELETE action support: treat as ARCHIVE for rollback
     if original_action == 'DELETE':
-        # Action is irreversible
-        return "ERROR: Cannot rollback DELETE action."
+        original_action = 'ARCHIVE'
     
     modification = {}
     status_msg = ""
@@ -370,4 +413,37 @@ def rollback_action(gmail_service, log_entry: dict, label_cache: dict) -> str:
         return status_msg
     except Exception as e:
         return f"Gmail API Error during rollback: {e}"
+
+
+def find_emails_by_query(service, query: str, max_results: int = 50) -> list:
+    """
+    Знаходить листи за Gmail query string.
+    
+    Args:
+        service: Initialized Gmail API service object
+        query: Gmail query string (наприклад, "from:ivan is:unread")
+        max_results: Максимальна кількість результатів (за замовчуванням 50)
+    
+    Returns:
+        List of message dictionaries with 'id' and 'threadId' keys
+    """
+    if not query or not query.strip():
+        return []
+    
+    try:
+        # Виклик Gmail API для пошуку
+        results = service.users().messages().list(
+            userId='me',
+            q=query,
+            maxResults=max_results
+        ).execute()
+        
+        messages = results.get('messages', [])
+        print(f"✅ [Voice Search] Found {len(messages)} emails for query: '{query}'")
+        return messages
+        
+    except Exception as e:
+        error_str = str(e)
+        print(f"❌ [Voice Search] Error searching emails: {error_str[:200]}")
+        return []
 

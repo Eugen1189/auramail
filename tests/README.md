@@ -49,3 +49,4 @@ Current coverage focuses on:
 3. Mark tests with `@pytest.mark.unit` or `@pytest.mark.integration`
 4. Follow naming convention: `test_*.py` for files, `test_*` for functions
 
+

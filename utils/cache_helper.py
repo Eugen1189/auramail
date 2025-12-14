@@ -24,3 +24,4 @@ def invalidate_stats_cache():
     except Exception as e:
         print(f"⚠️ Cache invalidation error: {e}")
 
+

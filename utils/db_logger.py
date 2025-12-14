@@ -59,11 +59,8 @@ def get_log_entry(msg_id):
     Finds a specific log entry by message ID.
     Returns dictionary for compatibility with old JSON format.
     """
-    try:
-        entry = ActionLog.query.filter_by(msg_id=msg_id).first()
-        return entry.to_dict() if entry else None
-    except Exception:
-        return None
+    entry = ActionLog.query.filter_by(msg_id=msg_id).first()
+    return entry.to_dict() if entry else None
 
 
 def get_action_history(limit=50):
@@ -71,11 +68,8 @@ def get_action_history(limit=50):
     Returns recent actions.
     Returns list of dictionaries for compatibility with old JSON format.
     """
-    try:
-        entries = ActionLog.query.order_by(ActionLog.timestamp.desc()).limit(limit).all()
-        return [entry.to_dict() for entry in reversed(entries)]  # Reverse to show oldest first
-    except Exception:
-        return []
+    entries = ActionLog.query.order_by(ActionLog.timestamp.desc()).limit(limit).all()
+    return [entry.to_dict() for entry in reversed(entries)]  # Reverse to show oldest first
 
 
 def get_daily_stats(days=7):
@@ -84,24 +78,21 @@ def get_daily_stats(days=7):
     Returns dictionary with date strings as keys.
     """
     stats = {}
-    try:
-        now = datetime.utcnow()
-        for i in range(days):
-            date_str = (now - timedelta(days=i)).strftime('%Y-%m-%d')
-            stats[date_str] = 0
-        
-        # Query logs from last N days
-        cutoff_date = now - timedelta(days=days)
-        entries = ActionLog.query.filter(ActionLog.timestamp >= cutoff_date).all()
-        
-        for entry in entries:
-            date_str = entry.timestamp.strftime('%Y-%m-%d')
-            if date_str in stats:
-                stats[date_str] += 1
-                
-        return stats
-    except Exception:
-        return stats
+    now = datetime.utcnow()
+    for i in range(days):
+        date_str = (now - timedelta(days=i)).strftime('%Y-%m-%d')
+        stats[date_str] = 0
+    
+    # Query logs from last N days
+    cutoff_date = now - timedelta(days=days)
+    entries = ActionLog.query.filter(ActionLog.timestamp >= cutoff_date).all()
+    
+    for entry in entries:
+        date_str = entry.timestamp.strftime('%Y-%m-%d')
+        if date_str in stats:
+            stats[date_str] += 1
+            
+    return stats
 
 
 # --- PROGRESS TRACKING FUNCTIONS ---
@@ -182,25 +173,15 @@ def get_progress():
     Reads current progress from database.
     Returns dictionary for API compatibility.
     """
-    try:
-        progress = Progress.query.first()
-        if progress:
-            return progress.to_dict()
-        else:
-            # Return default if no progress record exists
-            return {
-                'total': 0,
-                'current': 0,
-                'status': 'Idle',
-                'details': '',
-                'stats': {},
-                'progress_percentage': 0
-            }
-    except Exception:
+    progress = Progress.query.first()
+    if progress:
+        return progress.to_dict()
+    else:
+        # Return default if no progress record exists
         return {
             'total': 0,
             'current': 0,
-            'status': 'Error',
+            'status': 'Idle',
             'details': '',
             'stats': {},
             'progress_percentage': 0
@@ -225,7 +206,7 @@ def save_report(stats):
             newsletter=stats.get('newsletter', 0),
             social=stats.get('social', 0),
             review=stats.get('review', 0),
-            deleted=stats.get('deleted', 0),
+            archived=stats.get('archived', 0),
             errors=stats.get('errors', 0),
             stats=stats
         )
@@ -243,23 +224,11 @@ def get_latest_report():
     Gets the latest sorting report from database.
     Returns dictionary for compatibility with old JSON format.
     """
-    try:
-        report = Report.query.order_by(Report.created_at.desc()).first()
-        if report:
-            return report.to_dict()
-        else:
-            # Return empty stats if no report exists
-            return {
-                'total_processed': 0,
-                'important': 0,
-                'action_required': 0,
-                'newsletter': 0,
-                'social': 0,
-                'review': 0,
-                'deleted': 0,
-                'errors': 0
-            }
-    except Exception:
+    report = Report.query.order_by(Report.created_at.desc()).first()
+    if report:
+        return report.to_dict()
+    else:
+        # Return empty stats if no report exists
         return {
             'total_processed': 0,
             'important': 0,
@@ -267,7 +236,7 @@ def get_latest_report():
             'newsletter': 0,
             'social': 0,
             'review': 0,
-            'deleted': 0,
+            'archived': 0,
             'errors': 0
         }
 

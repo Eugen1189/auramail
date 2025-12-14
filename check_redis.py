@@ -2,9 +2,10 @@
 """
 Quick script to check Redis connection.
 """
+import sys
+import redis
 from config import REDIS_URL
 from redis import Redis
-import sys
 
 try:
     print(f"🔍 Перевірка підключення до Redis: {REDIS_URL}")

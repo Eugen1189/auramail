@@ -100,7 +100,7 @@ class Report(db.Model):
     newsletter = db.Column(db.Integer, default=0)
     social = db.Column(db.Integer, default=0)
     review = db.Column(db.Integer, default=0)
-    deleted = db.Column(db.Integer, default=0)
+    archived = db.Column(db.Integer, default=0)  # Changed from deleted - we preserve all emails
     errors = db.Column(db.Integer, default=0)
     
     # Store full statistics as JSON for flexibility
@@ -115,7 +115,7 @@ class Report(db.Model):
             'newsletter': self.newsletter,
             'social': self.social,
             'review': self.review,
-            'deleted': self.deleted,
+            'archived': self.archived,
             'errors': self.errors
         }
     
@@ -147,4 +147,5 @@ def init_db(app):
     db.init_app(app)
     
     return db
+
 

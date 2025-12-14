@@ -11,7 +11,7 @@ class TestGetGeminiClient:
     """Test suite for get_gemini_client function."""
     
     @patch('utils.gemini_processor.genai')
-    @patch.dict('os.environ', {'GEMINI_API_KEY': 'test-api-key'})
+    @patch('utils.gemini_processor.GEMINI_API_KEY', 'AIzaTestKey123456')
     def test_get_gemini_client_initializes_with_api_key(self, mock_genai):
         """Test that get_gemini_client initializes client with API key from config."""
         from utils.gemini_processor import get_gemini_client
@@ -21,7 +21,7 @@ class TestGetGeminiClient:
         
         client = get_gemini_client()
         
-        mock_genai.Client.assert_called_once()
+        mock_genai.Client.assert_called_once_with(api_key='AIzaTestKey123456')
         assert client == mock_client
     
     @patch('utils.gemini_processor.genai')

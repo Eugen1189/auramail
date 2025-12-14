@@ -71,3 +71,4 @@ class TestRateLimiter:
         call_args = mock_redis.expire.call_args
         assert call_args[0][1] == 120  # TTL in seconds
 
+

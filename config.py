@@ -22,8 +22,10 @@ SCOPES = [
 BASE_URI = config("BASE_URI", default="https://127.0.0.1:5000")
 
 # Flask Configuration
-# CRITICAL: Generate a secure key using: python -c "import secrets; print(secrets.token_hex(32))"
-FLASK_SECRET_KEY = config("FLASK_SECRET_KEY", default="VERY_SECRET_KEY_FOR_SESSIONS_CHANGE_IN_PRODUCTION")
+# CRITICAL: FLASK_SECRET_KEY MUST be set in .env file or environment variable
+# Generate a secure key using: python -c "import secrets; print(secrets.token_hex(32))"
+# The application will FAIL to start if this key is not set (no default for security)
+FLASK_SECRET_KEY = config("FLASK_SECRET_KEY")  # REQUIRED - no default for security
 
 # Gemini AI Configuration
 def clean_api_key(api_key):
@@ -96,6 +98,28 @@ DEBUG = config("DEBUG", default=False, cast=bool)
 
 # Folders to process
 FOLDERS_TO_PROCESS = ['INBOX', 'SPAM', 'TRASH']
+
+# Gmail Label Color Configuration
+# Valid Gmail API label colors (using Gmail color names, not HEX codes)
+# Gmail API accepts color names as strings: red, orange, yellow, green, teal, blue, purple, magenta, gray, lightGray
+# Reference: https://developers.google.com/gmail/api/reference/rest/v1/users.labels
+# Format: Color name as string (e.g., "blue", "red", "green")
+LABEL_COLOR_MAP = {
+    # Category-based colors for AI labels
+    # Using Gmail-approved color names (strings, not HEX codes)
+    'IMPORTANT': 'blue',           # Blue - for important emails
+    'ACTION_REQUIRED': 'red',      # Red - for urgent action required
+    'BILLS_INVOICES': 'orange',    # Orange - for financial documents
+    'PERSONAL': 'green',           # Green - for personal emails
+    'PROJECT': 'purple',           # Purple - for project-related
+    'REVIEW': 'yellow',            # Yellow - for emails needing review
+    'NEWSLETTER': 'gray',          # Gray - for newsletters/marketing
+    'SOCIAL': 'teal',              # Teal (cyan-blue-green) - for social media notifications
+    'SPAM': 'red',                 # Red - for spam (archived, not deleted)
+    'MARKETING': 'lightGray',      # Light gray - for marketing emails
+    # Default color for AI labels
+    'DEFAULT': 'blue'              # Default blue
+}
 
 
 def is_production_ready():

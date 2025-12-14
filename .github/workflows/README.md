@@ -78,3 +78,4 @@ Add to your README.md:
 ![Coverage](https://codecov.io/gh/yourusername/auramail/branch/main/graph/badge.svg)
 ```
 
+

@@ -2,6 +2,10 @@
 
 **Production-ready email management system with AI classification, automated sorting, and comprehensive test coverage.**
 
+## 🛡️ Data Preservation Policy
+
+**AuraMail ніколи не видаляє ваші листи назавжди.** Всі листи залишаються доступними у папці "All Mail". Ми використовуємо архівування (ARCHIVE) замість видалення для 100% збереження даних. Дивіться [NO_DELETE_POLICY.md](NO_DELETE_POLICY.md) для деталей.
+
 ## 📊 Project Status
 
 - ✅ **60 tests** - All passing (100%)
@@ -150,3 +154,4 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
 **Repository:** https://github.com/Eugen1189/auramail
 
 "# auramail" 
+

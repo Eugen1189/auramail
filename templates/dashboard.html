@@ -263,6 +263,126 @@
             transform: none;
         }
 
+        /* Voice Search Styles */
+        .voice-search-container {
+            display: flex;
+            gap: 12px;
+            margin-top: 20px;
+        }
+
+        .btn-voice-search {
+            flex: 1;
+            padding: 18px 32px;
+            font-size: 16px;
+            font-weight: 600;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-voice-search:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(74, 144, 226, 0.3);
+        }
+
+        .btn-voice-search:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-voice-search.recording {
+            background: linear-gradient(135deg, var(--danger), #FF6B6B);
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255, 75, 75, 0.7); }
+            50% { box-shadow: 0 0 0 10px rgba(255, 75, 75, 0); }
+        }
+
+        .voice-search-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(5px);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .voice-search-modal.active {
+            display: flex;
+        }
+
+        .voice-search-content {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            padding: 40px;
+            border-radius: 24px;
+            width: 90%;
+            max-width: 500px;
+            text-align: center;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        }
+
+        .voice-status {
+            font-size: 18px;
+            color: var(--text-main);
+            margin: 20px 0;
+            min-height: 24px;
+        }
+
+        .voice-transcript {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin: 20px 0;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            min-height: 60px;
+            text-align: left;
+        }
+
+        .voice-results {
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            text-align: left;
+        }
+
+        .voice-result-item {
+            padding: 15px;
+            margin-bottom: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            border-left: 3px solid var(--accent-blue);
+        }
+
+        .voice-result-subject {
+            font-weight: 600;
+            color: var(--text-main);
+            margin-bottom: 5px;
+        }
+
+        .voice-result-snippet {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
         /* Analytics Card */
         .analytics-card {
             background: var(--card-bg);
@@ -543,6 +663,11 @@
                 <button id="startSortBtn" class="btn-start-sorting">
                     START SMART SORTING
                 </button>
+                <div class="voice-search-container">
+                    <button id="voiceSearchBtn" class="btn-voice-search">
+                        🎤 Голосовий Пошук
+                    </button>
+                </div>
             </div>
 
             <!-- Analytics Card -->
@@ -568,7 +693,7 @@
                     </div>
                     <div class="legend-item">
                         <div class="legend-color gray"></div>
-                        <span>Deleted ({{ stats.deleted }})</span>
+                        <span>Archived ({{ stats.archived }})</span>
                     </div>
                 </div>
 
@@ -599,8 +724,8 @@
                     <div class="activity-item">
                         <div class="activity-check">✔</div>
                         <div class="activity-text">
-                            {% if action.action_taken == 'DELETE' %}
-                                Classified <strong>{{ action.msg_id[:8] }}</strong> as SPAM. Action: <strong>Deleted</strong>.
+                            {% if action.action_taken == 'ARCHIVE' or action.action_taken == 'ARCHIVED' %}
+                                Classified <strong>{{ action.msg_id[:8] }}</strong> as SPAM/Newsletter. Action: <strong>Archived</strong>.
                             {% elif action.action_taken.startswith('MOVED') or action.action_taken.startswith('MOVED_TO') %}
                                 Moved <strong>{{ action.msg_id[:8] }}...</strong> to <strong>{{ action.action_taken.replace('MOVED_TO_', '').replace('MOVED_', '') }}</strong>.
                             {% else %}
@@ -643,12 +768,26 @@
                     <div id="statProcessed" style="font-weight: bold; font-size: 18px;">0</div>
                 </div>
                 <div style="background: rgba(255,75,75,0.1); padding: 10px; border-radius: 8px;">
-                    <small style="color: #FF4B4B">Видалено</small>
-                    <div id="statDeleted" style="font-weight: bold; color: #FF4B4B; font-size: 18px;">0</div>
+                    <small style="color: #BB86FC">Архівовано</small>
+                    <div id="statArchived" style="font-weight: bold; color: #BB86FC; font-size: 18px;">0</div>
                 </div>
             </div>
             
             <p style="margin-top: 20px; font-size: 12px; color: #666;">Будь ласка, не закривайте цю сторінку.</p>
+        </div>
+    </div>
+
+    <!-- Voice Search Modal -->
+    <div id="voiceSearchModal" class="voice-search-modal">
+        <div class="voice-search-content">
+            <h2 style="margin-bottom: 20px;">🎤 Голосовий Пошук</h2>
+            <div id="voiceStatus" class="voice-status">Натисніть кнопку для початку запису</div>
+            <div id="voiceTranscript" class="voice-transcript"></div>
+            <div id="voiceResults" class="voice-results"></div>
+            <div style="margin-top: 20px;">
+                <button id="stopVoiceBtn" style="display: none; padding: 10px 20px; background: var(--danger); color: white; border: none; border-radius: 8px; cursor: pointer;">Зупинити</button>
+                <button id="closeVoiceModal" style="margin-left: 10px; padding: 10px 20px; background: var(--text-secondary); color: white; border: none; border-radius: 8px; cursor: pointer;">Закрити</button>
+            </div>
         </div>
     </div>
 
@@ -658,14 +797,14 @@
         const totalProcessed = {{ stats.total_processed }};
         const important = {{ stats.important + stats.action_required }};
         const review = {{ stats.review }};
-        const deleted = {{ stats.deleted }};
+        const archived = {{ stats.archived }};
 
         new Chart(ctx, {
             type: 'doughnut',
             data: {
-                labels: ['Important', 'Review', 'Deleted'],
+                labels: ['Important', 'Review', 'Archived'],
                 datasets: [{
-                    data: [important, review, deleted],
+                    data: [important, review, archived],
                     backgroundColor: [
                         '#4A90E2',
                         '#00D4AA',
@@ -689,11 +828,163 @@
             }
         });
 
+        // Voice Search Variables
+        let recognition = null;
+        let isRecording = false;
+        let currentTranscript = '';
+
+        // Initialize Web Speech API
+        function initVoiceRecognition() {
+            if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                recognition = new SpeechRecognition();
+                recognition.lang = 'uk-UA'; // Ukrainian language
+                recognition.continuous = true;
+                recognition.interimResults = true;
+
+                recognition.onstart = function() {
+                    isRecording = true;
+                    document.getElementById('voiceSearchBtn').classList.add('recording');
+                    document.getElementById('voiceSearchBtn').textContent = '🔴 Запис...';
+                    document.getElementById('voiceStatus').textContent = 'Слухаю... Говоріть ваш запит';
+                    document.getElementById('stopVoiceBtn').style.display = 'inline-block';
+                    currentTranscript = '';
+                };
+
+                recognition.onresult = function(event) {
+                    let interimTranscript = '';
+                    let finalTranscript = '';
+
+                    for (let i = event.resultIndex; i < event.results.length; i++) {
+                        const transcript = event.results[i][0].transcript;
+                        if (event.results[i].isFinal) {
+                            finalTranscript += transcript + ' ';
+                        } else {
+                            interimTranscript += transcript;
+                        }
+                    }
+
+                    currentTranscript = finalTranscript || interimTranscript;
+                    document.getElementById('voiceTranscript').textContent = currentTranscript;
+                };
+
+                recognition.onerror = function(event) {
+                    console.error('Speech recognition error:', event.error);
+                    document.getElementById('voiceStatus').textContent = 'Помилка: ' + event.error;
+                    stopVoiceRecording();
+                };
+
+                recognition.onend = function() {
+                    if (isRecording) {
+                        // Restart if still recording
+                        try {
+                            recognition.start();
+                        } catch (e) {
+                            console.error('Error restarting recognition:', e);
+                            stopVoiceRecording();
+                        }
+                    }
+                };
+            } else {
+                console.warn('Speech Recognition not supported in this browser');
+                document.getElementById('voiceSearchBtn').disabled = true;
+                document.getElementById('voiceSearchBtn').textContent = '❌ Не підтримується';
+            }
+        }
+
+        function startVoiceSearch() {
+            const modal = document.getElementById('voiceSearchModal');
+            modal.classList.add('active');
+
+            if (!recognition) {
+                initVoiceRecognition();
+            }
+
+            if (recognition && !isRecording) {
+                try {
+                    recognition.start();
+                } catch (e) {
+                    console.error('Error starting recognition:', e);
+                    document.getElementById('voiceStatus').textContent = 'Помилка запуску запису';
+                }
+            }
+        }
+
+        function stopVoiceRecording() {
+            isRecording = false;
+            if (recognition) {
+                recognition.stop();
+            }
+            document.getElementById('voiceSearchBtn').classList.remove('recording');
+            document.getElementById('voiceSearchBtn').textContent = '🎤 Голосовий Пошук';
+            document.getElementById('stopVoiceBtn').style.display = 'none';
+
+            if (currentTranscript.trim()) {
+                document.getElementById('voiceStatus').textContent = 'Шукаю...';
+                performVoiceSearch(currentTranscript.trim());
+            } else {
+                document.getElementById('voiceStatus').textContent = 'Запит порожній. Спробуйте ще раз.';
+            }
+        }
+
+        function performVoiceSearch(query) {
+            fetch('/voice/search', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ query: query })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'started') {
+                    document.getElementById('voiceStatus').textContent = 'Пошук запущено. Очікування результатів...';
+                    // Poll for results (simplified - in production, use RQ job status)
+                    setTimeout(() => {
+                        // For now, show a message that search is in progress
+                        // In production, implement proper job status polling
+                        document.getElementById('voiceStatus').textContent = 'Пошук виконується. Результати будуть показані після завершення.';
+                    }, 2000);
+                } else {
+                    document.getElementById('voiceStatus').textContent = 'Помилка: ' + (data.message || 'Unknown error');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('voiceStatus').textContent = 'Помилка з\'єднання: ' + error.message;
+            });
+        }
+
+        function closeVoiceModal() {
+            if (isRecording) {
+                stopVoiceRecording();
+            }
+            document.getElementById('voiceSearchModal').classList.remove('active');
+            document.getElementById('voiceResults').innerHTML = '';
+            document.getElementById('voiceTranscript').textContent = '';
+            document.getElementById('voiceStatus').textContent = 'Натисніть кнопку для початку запису';
+        }
+
         // Event Listeners
         document.addEventListener('DOMContentLoaded', function() {
             const btn = document.getElementById('startSortBtn');
             if (btn) {
                 btn.addEventListener('click', startSorting);
+            }
+
+            const voiceBtn = document.getElementById('voiceSearchBtn');
+            if (voiceBtn) {
+                voiceBtn.addEventListener('click', startVoiceSearch);
+            }
+
+            const stopVoiceBtn = document.getElementById('stopVoiceBtn');
+            if (stopVoiceBtn) {
+                stopVoiceBtn.addEventListener('click', stopVoiceRecording);
+            }
+
+            const closeVoiceModalBtn = document.getElementById('closeVoiceModal');
+            if (closeVoiceModalBtn) {
+                closeVoiceModalBtn.addEventListener('click', closeVoiceModal);
             }
         });
 
@@ -765,7 +1056,7 @@
 
                         if (data.statistics) {
                             document.getElementById('statProcessed').innerText = data.statistics.total_processed || 0;
-                            document.getElementById('statDeleted').innerText = data.statistics.deleted || 0;
+                            document.getElementById('statArchived').innerText = data.statistics.archived || 0;
                         }
 
                         if ((data.current_message >= data.total_messages && data.total_messages > 0) ||

@@ -91,3 +91,4 @@ print("✅ .env file has been fixed!")
 print("📝 Added line breaks and removed duplicates")
 print("➕ Added missing variables: TIMEZONE, PROGRESS_FILE, CORS_ORIGINS, ALLOW_ALL_CORS, FORCE_HTTPS")
 
+

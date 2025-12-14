@@ -76,7 +76,7 @@ class TestDatabaseOperations:
                 'newsletter': 20,
                 'social': 15,
                 'review': 30,
-                'deleted': 20,
+                'archived': 20,
                 'errors': 0
             }
             
@@ -87,20 +87,20 @@ class TestDatabaseOperations:
             assert report is not None
             assert report.total_processed == 100
             assert report.important == 10
-            assert report.deleted == 20
+            assert report.archived == 20
     
     def test_get_latest_report_retrieves_most_recent(self, app):
         """Test that get_latest_report retrieves the most recent report."""
         with app.app_context():
             # Create two reports
             save_report({'total_processed': 50, 'important': 5, 'action_required': 2, 
-                        'newsletter': 10, 'social': 5, 'review': 15, 'deleted': 10, 'errors': 2})
+                        'newsletter': 10, 'social': 5, 'review': 15, 'archived': 10, 'errors': 2})
             
             import time
             time.sleep(0.1)  # Ensure different timestamps
             
             save_report({'total_processed': 100, 'important': 10, 'action_required': 5,
-                        'newsletter': 20, 'social': 15, 'review': 30, 'deleted': 20, 'errors': 0})
+                        'newsletter': 20, 'social': 15, 'review': 30, 'archived': 20, 'errors': 0})
             
             latest = get_latest_report()
             
