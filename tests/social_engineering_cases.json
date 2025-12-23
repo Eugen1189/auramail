@@ -1,0 +1,101 @@
+{
+  "test_cases": [
+    {
+      "id": "social_engineering_1",
+      "description": "Urgent request from colleague with Google Drive link",
+      "subject": "URGENT: Please review the report",
+      "content": "Привіт!\n\nЦе терміново! Будь ласка, перегляньте звіт за посиланням:\nhttps://drive.google.com/file/d/1a2b3c4d5e6f/view?usp=sharing\n\nПотрібно до кінця дня.\n\nДякую,\nІван",
+      "sender": "ivan.petrov@company.com",
+      "reply_to": "ivan.petrov@gmail.com",
+      "expected_threat_level": "HIGH",
+      "expected_category": "DANGER",
+      "expected_suspicious_score": 10,
+      "reason": "Urgent request + external link + reply-to mismatch = social engineering"
+    },
+    {
+      "id": "social_engineering_2",
+      "description": "Urgent request from similar email domain",
+      "subject": "URGENT: Action Required",
+      "content": "Шановний колего!\n\nЦе терміново! Перейдіть за посиланням для перевірки:\nhttp://company-security.com/verify\n\nТермін: до завтра.\n\nЗ повагою,\nВідділ безпеки",
+      "sender": "security@company-security.com",
+      "reply_to": null,
+      "expected_threat_level": "HIGH",
+      "expected_category": "DANGER",
+      "expected_suspicious_score": 10,
+      "reason": "Urgent + suspicious link + similar domain (company-security vs company) = phishing"
+    },
+    {
+      "id": "social_engineering_3",
+      "description": "Urgent request with password reset link",
+      "subject": "URGENT: Password Reset Required",
+      "content": "Ваш пароль буде скинуто через 24 години.\n\nДля підтвердження перейдіть за посиланням:\nhttps://company-verify.net/reset?token=abc123\n\nЯкщо ви не запитували скидання, ігноруйте це повідомлення.",
+      "sender": "noreply@company-verify.net",
+      "reply_to": null,
+      "expected_threat_level": "HIGH",
+      "expected_category": "DANGER",
+      "expected_suspicious_score": 10,
+      "reason": "Urgent + password reset + suspicious domain = high risk"
+    },
+    {
+      "id": "social_engineering_4",
+      "description": "Urgent request from boss with external link",
+      "subject": "URGENT: Review this document ASAP",
+      "content": "Привіт,\n\nЦе терміново! Перегляньте документ:\nhttps://docs.google.com/document/d/xyz123/edit\n\nПотрібно до 18:00 сьогодні.\n\nДякую,\nДиректор",
+      "sender": "director@company.com",
+      "reply_to": "director@gmail.com",
+      "expected_threat_level": "MEDIUM",
+      "expected_category": "SPAM",
+      "expected_suspicious_score": 7,
+      "reason": "Urgent + external link + reply-to mismatch, but legitimate Google Docs domain"
+    },
+    {
+      "id": "social_engineering_5",
+      "description": "Urgent request without link (safe)",
+      "subject": "URGENT: Meeting tomorrow",
+      "content": "Привіт!\n\nНагадую про зустріч завтра о 10:00.\n\nБудь ласка, підтвердіть вашу присутність.\n\nДякую,\nМарія",
+      "sender": "maria@company.com",
+      "reply_to": null,
+      "expected_threat_level": "LOW",
+      "expected_category": null,
+      "expected_suspicious_score": 3,
+      "reason": "Urgent but no link = safe (capped at 3)"
+    },
+    {
+      "id": "social_engineering_6",
+      "description": "Urgent request with internal company link",
+      "subject": "URGENT: Review report",
+      "content": "Привіт!\n\nТерміново перегляньте звіт:\nhttps://internal.company.com/reports/2025\n\nПотрібно до кінця дня.\n\nДякую,\nОлег",
+      "sender": "oleg@company.com",
+      "reply_to": null,
+      "expected_threat_level": "LOW",
+      "expected_category": null,
+      "expected_suspicious_score": 5,
+      "reason": "Urgent + internal company link = flagged but LOW threat (internal links are safer)"
+    },
+    {
+      "id": "social_engineering_7",
+      "description": "Urgent request with shortened URL",
+      "subject": "URGENT: Verify your account",
+      "content": "Ваш акаунт потребує верифікації.\n\nПерейдіть за посиланням:\nhttps://bit.ly/verify-account-2025\n\nТермін: до завтра.",
+      "sender": "noreply@company.com",
+      "reply_to": "noreply@external-service.com",
+      "expected_threat_level": "HIGH",
+      "expected_category": "DANGER",
+      "expected_suspicious_score": 10,
+      "reason": "Urgent + shortened URL (bit.ly) + reply-to mismatch = high risk"
+    },
+    {
+      "id": "social_engineering_8",
+      "description": "Urgent request with IP address link",
+      "subject": "URGENT: Security Alert",
+      "content": "Виявлено підозрілу активність.\n\nПеревірте за посиланням:\nhttp://192.168.1.100/verify\n\nТерміново!",
+      "sender": "security@company.com",
+      "reply_to": null,
+      "expected_threat_level": "HIGH",
+      "expected_category": "DANGER",
+      "expected_suspicious_score": 10,
+      "reason": "Urgent + IP address in URL = very suspicious"
+    }
+  ]
+}
+
