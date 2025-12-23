@@ -3,24 +3,31 @@ version: '3.8'
 services:
   redis:
     image: redis:7-alpine
+    container_name: auramail-redis
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
+    networks:
+      - auramail-network
 
   db:
     image: postgres:15-alpine
+    container_name: auramail-db
     environment:
       POSTGRES_USER: ${DB_USER:-auramail}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-auramail_password}
       POSTGRES_DB: ${DB_NAME:-auramail}
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -28,17 +35,27 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
+    networks:
+      - auramail-network
 
   web:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: auramail-web
     ports:
-      - "5000:5000"
+      - "${WEB_PORT:-5000}:5000"
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - CACHE_REDIS_URL=redis://redis:6379/1
       - DATABASE_URL=postgresql://${DB_USER:-auramail}:${DB_PASSWORD:-auramail_password}@db:5432/${DB_NAME:-auramail}
-      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-change-me-in-production}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - DEBUG=${DEBUG:-False}
+      - BASE_URI=${BASE_URI:-https://127.0.0.1:5000}
+      - FORCE_HTTPS=${FORCE_HTTPS:-False}
+      - ALLOW_ALL_CORS=${ALLOW_ALL_CORS:-False}
     depends_on:
       redis:
         condition: service_healthy
@@ -46,14 +63,28 @@ services:
         condition: service_healthy
     volumes:
       - ./client_secret.json:/app/client_secret.json:ro
+    restart: unless-stopped
+    networks:
+      - auramail-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   worker:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: auramail-worker
     command: python worker.py
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - CACHE_REDIS_URL=redis://redis:6379/1
       - DATABASE_URL=postgresql://${DB_USER:-auramail}:${DB_PASSWORD:-auramail_password}@db:5432/${DB_NAME:-auramail}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-change-me-in-production}
     depends_on:
       redis:
         condition: service_healthy
@@ -61,10 +92,25 @@ services:
         condition: service_healthy
     volumes:
       - ./client_secret.json:/app/client_secret.json:ro
+    restart: unless-stopped
+    networks:
+      - auramail-network
+    # Worker doesn't need healthcheck, but we can add logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   redis_data:
+    driver: local
   postgres_data:
+    driver: local
+
+networks:
+  auramail-network:
+    driver: bridge
 
 
 

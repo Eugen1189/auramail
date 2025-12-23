@@ -819,20 +819,27 @@
                 <span style="font-size: 14px; color: var(--text-secondary); margin-left: 10px;">2.5</span>
             </div>
             <div class="header-right">
-                <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
+                <div style="display: flex; gap: 12px; align-items: center;">
+                    <!-- Export Buttons -->
+                    <button onclick="exportToCSV()" class="btn-export" title="Export to CSV">
+                        📊 CSV
+                    </button>
+                    <button onclick="exportToPDF()" class="btn-export" title="Export to PDF">
+                        📄 PDF
+                    </button>
                     <button id="voiceSearchBtnHeader" class="btn-voice-search-header">
                         🎤 Voice Search
                     </button>
-                    <div id="audioVisualizer" class="audio-visualizer">
-                        <div class="visualizer-bar"></div>
-                        <div class="visualizer-bar"></div>
-                        <div class="visualizer-bar"></div>
-                        <div class="visualizer-bar"></div>
-                        <div class="visualizer-bar"></div>
-                        <div class="visualizer-bar"></div>
-                        <div class="visualizer-bar"></div>
-                        <div class="visualizer-bar"></div>
-                    </div>
+                </div>
+                <div id="audioVisualizer" class="audio-visualizer">
+                    <div class="visualizer-bar"></div>
+                    <div class="visualizer-bar"></div>
+                    <div class="visualizer-bar"></div>
+                    <div class="visualizer-bar"></div>
+                    <div class="visualizer-bar"></div>
+                    <div class="visualizer-bar"></div>
+                    <div class="visualizer-bar"></div>
+                    <div class="visualizer-bar"></div>
                 </div>
                 <div class="status-indicator">
                     <div class="status-dot"></div>
@@ -852,12 +859,12 @@
         {% endwith %}
 
         <div class="main-grid">
-            <!-- TIME SAVED Widget -->
+            <!-- TIME SAVED Widget (Dashboard 2.0) -->
             <div class="widget time-saved-widget">
-                <div class="widget-title">TIME SAVED</div>
-                <div class="time-saved-subtitle">Auto-Sorted Emails</div>
-                <div class="time-saved-value">
-                    AVERAGE <span style="display: block; margin-top: 5px;">2 HOURS/WEEK</span>
+                <div class="widget-title">TIME & COST SAVINGS</div>
+                <div class="time-saved-subtitle">Last 30 Days</div>
+                <div id="roiDisplay" class="time-saved-value" style="font-size: 18px; margin-bottom: 10px;">
+                    Loading...
                 </div>
                 <div class="time-chart-container">
                     <canvas id="timeChart"></canvas>
@@ -865,6 +872,35 @@
                 <button class="btn-start-sorting" onclick="startSorting()" style="width: 100%; margin-top: 20px; padding: 14px 24px; background: linear-gradient(135deg, var(--accent-teal), var(--accent-purple)); border: none; border-radius: 12px; color: white; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.3s;">
                     START SMART SORTING
                 </button>
+            </div>
+
+            <!-- ROI Widget (Dashboard 2.0) -->
+            <div class="widget" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px; padding: 24px;">
+                <div class="widget-title">ROI ANALYTICS</div>
+                <div id="roiMetrics" style="margin-top: 20px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                        <div style="text-align: center; padding: 15px; background: rgba(74, 144, 226, 0.1); border-radius: 12px;">
+                            <div style="font-size: 24px; font-weight: 700; color: var(--accent-blue);" id="hoursSaved">-</div>
+                            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Hours Saved</div>
+                        </div>
+                        <div style="text-align: center; padding: 15px; background: rgba(0, 212, 170, 0.1); border-radius: 12px;">
+                            <div style="font-size: 24px; font-weight: 700; color: var(--accent-teal);" id="costSaved">-</div>
+                            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Cost Saved (USD)</div>
+                        </div>
+                        <div style="text-align: center; padding: 15px; background: rgba(157, 78, 221, 0.1); border-radius: 12px;">
+                            <div style="font-size: 24px; font-weight: 700; color: var(--accent-purple);" id="aiCost">-</div>
+                            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">AI Cost (USD)</div>
+                        </div>
+                        <div style="text-align: center; padding: 15px; background: rgba(0, 200, 83, 0.1); border-radius: 12px;">
+                            <div style="font-size: 24px; font-weight: 700; color: var(--success);" id="netSavings">-</div>
+                            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Net Savings (USD)</div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 20px; padding: 15px; background: rgba(255, 255, 255, 0.05); border-radius: 12px; text-align: center;">
+                        <div style="font-size: 20px; font-weight: 700; color: var(--accent-teal);" id="roiPercentage">-</div>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">ROI Percentage</div>
+                    </div>
+                </div>
             </div>
 
             <!-- FOLLOW-UP MONITOR Widget -->
@@ -1044,9 +1080,117 @@
     </div>
 
     <script>
-        // Initialize Time Chart (Bar Chart)
+        // Dashboard 2.0: Load Analytics Data
+        async function loadAnalytics() {
+            try {
+                // Load ROI data
+                const roiResponse = await fetch('/api/analytics/roi?days=30');
+                const roiData = await roiResponse.json();
+                
+                if (roiData && !roiData.status) {
+                    // Update ROI display
+                    document.getElementById('hoursSaved').textContent = roiData.time_savings?.total_hours_saved?.toFixed(1) || '0';
+                    document.getElementById('costSaved').textContent = '$' + (roiData.cost_saved_usd?.toFixed(2) || '0.00');
+                    document.getElementById('aiCost').textContent = '$' + (roiData.ai_cost_usd?.toFixed(4) || '0.0000');
+                    document.getElementById('netSavings').textContent = '$' + (roiData.net_savings_usd?.toFixed(2) || '0.00');
+                    document.getElementById('roiPercentage').textContent = (roiData.roi_percentage?.toFixed(1) || '0') + '%';
+                    
+                    // Update ROI summary
+                    const roiDisplay = document.getElementById('roiDisplay');
+                    if (roiDisplay) {
+                        roiDisplay.innerHTML = `
+                            <div style="font-size: 16px; color: var(--accent-teal); font-weight: 600;">
+                                ${roiData.time_savings?.total_hours_saved?.toFixed(1) || '0'} Hours Saved
+                            </div>
+                            <div style="font-size: 14px; color: var(--text-secondary); margin-top: 5px;">
+                                $${roiData.net_savings_usd?.toFixed(2) || '0.00'} Net Savings
+                            </div>
+                        `;
+                    }
+                }
+                
+                // Load chart data
+                const chartResponse = await fetch('/api/analytics/chart-data?days=30&type=time-savings');
+                const chartData = await chartResponse.json();
+                
+                if (chartData && !chartData.status && chartData.labels) {
+                    // Update time chart with real data
+                    updateTimeChart(chartData);
+                }
+            } catch (error) {
+                console.error('Error loading analytics:', error);
+            }
+        }
+
+        // Export Functions
+        function exportToCSV() {
+            window.location.href = '/export/csv';
+        }
+
+        function exportToPDF() {
+            window.location.href = '/export/pdf';
+        }
+
+        // Initialize Time Chart with Real Data
+        function updateTimeChart(chartData) {
+            const timeCtx = document.getElementById('timeChart').getContext('2d');
+            
+            if (window.timeChartInstance) {
+                window.timeChartInstance.destroy();
+            }
+            
+            window.timeChartInstance = new Chart(timeCtx, {
+                type: 'line',
+                data: chartData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: '#A0A0A0'
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                color: '#A0A0A0'
+                            },
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.05)'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            ticks: {
+                                color: '#00D4AA'
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        },
+                        x: {
+                            ticks: {
+                                color: '#A0A0A0',
+                                maxRotation: 45,
+                                minRotation: 45
+                            },
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.05)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Initialize Time Chart (Fallback with sample data)
         const timeCtx = document.getElementById('timeChart').getContext('2d');
-        new Chart(timeCtx, {
+        window.timeChartInstance = new Chart(timeCtx, {
             type: 'bar',
             data: {
                 labels: ['1', '2', '3', '4', '5'],

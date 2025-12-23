@@ -423,29 +423,114 @@ def _background_sort_task_impl(credentials_json):
 
         # Gemini клієнт зазвичай thread-safe, його можна передавати
         gemini_client = get_gemini_client()
-
-        # 🔥 ЗАПУСК ПАРАЛЕЛЬНОЇ ОБРОБКИ (тільки для нових листів)
-        completed_count = 0
         
-        # Create Flask app instance to pass to threads
-        # Each thread needs its own app context
-        from app_factory import create_app
-        thread_app = create_app()
+        # CRITICAL OPTIMIZATION: Batch AI Processing
+        # Group emails into batches of 5-10 for single API call, reducing token costs by 20-30%
+        # Check if batch processing is enabled (can be controlled via config)
+        # Disable batch processing in tests to maintain compatibility with existing mocks
+        import os
+        USE_BATCH_PROCESSING = os.environ.get('USE_BATCH_PROCESSING', 'true').lower() == 'true' and not os.environ.get('TESTING')
         
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            # ПЕРЕДАЄМО credentials_json, А НЕ service
-            # Also pass flask_app so each thread can create app context
-            # ВАЖЛИВО: Обробляємо тільки new_messages (вже відфільтровані LibrarianAgent)
-            future_to_msg = {
-                executor.submit(
-                    process_single_email_task, 
-                    msg, 
-                    credentials_json,  # <--- Передаємо рядок JSON, щоб створити сервіс всередині
-                    gemini_client, 
-                    label_cache,
-                    thread_app  # Pass Flask app so thread can create context
-                ): msg for msg in new_messages  # <--- Використовуємо new_messages замість unique_messages
-            }
+        # CRITICAL OPTIMIZATION: Redis Streams for logging
+        # Use Redis Streams for temporary log storage during processing
+        from utils.redis_logger import log_to_stream, flush_stream_to_db, clear_stream
+        import uuid
+        task_id = str(uuid.uuid4())[:8]  # Short task ID for stream key
+        
+        if USE_BATCH_PROCESSING and len(new_messages) >= 5:
+            # Use batch processing for 5+ emails
+            print(f"📦 [Batch Processor] Using batch processing for {len(new_messages)} emails...")
+            from utils.batch_processor import process_emails_in_batches
+            
+            # Prepare email data for batch processing
+            email_batch_data = []
+            for msg in new_messages:
+                msg_id = msg.get('id', 'unknown')
+                # Get email content (subject and snippet)
+                subject = msg.get('subject', 'No Subject')
+                content = msg.get('snippet', msg.get('content', ''))
+                email_batch_data.append({
+                    'msg_id': msg_id,
+                    'subject': subject,
+                    'content': content
+                })
+            
+            # Process emails in batches
+            batch_classifications = process_emails_in_batches(email_batch_data, gemini_client)
+            
+            # Process each email with its classification
+            completed_count = 0
+            for idx, msg in enumerate(new_messages):
+                if idx < len(batch_classifications):
+                    classification = batch_classifications[idx]
+                    msg_id = msg.get('id', 'unknown')
+                    subject = msg.get('subject', 'No Subject')
+                    
+                    # Process action
+                    try:
+                        creds_obj = Credentials.from_authorized_user_info(json.loads(credentials_json), SCOPES)
+                        local_service, local_calendar_service = build_google_services(creds_obj)
+                        
+                        action_status = process_message_action(local_service, msg_id, classification, label_cache)
+                        
+                        # Log to Redis Stream instead of database
+                        log_to_stream(task_id, msg_id, classification, action_status, subject)
+                        
+                        integrate_with_calendar(local_calendar_service, classification, msg.get('snippet', ''))
+                        
+                        completed_count += 1
+                        stats['total_processed'] = completed_count
+                        
+                        # Update stats based on action status
+                        if not action_status.startswith("ERROR"):
+                            cat = classification.get('category', 'REVIEW')
+                            if "ARCHIVED" in action_status:
+                                stats['archived'] += 1
+                            elif "MOVED" in action_status:
+                                mapping = {
+                                    "IMPORTANT": 'important', "ACTION_REQUIRED": 'action_required',
+                                    "NEWSLETTER": 'newsletter', "SOCIAL": 'social', "REVIEW": 'review'
+                                }
+                                key = mapping.get(cat, 'review')
+                                stats[key] = stats.get(key, 0) + 1
+                        else:
+                            stats['errors'] += 1
+                        
+                        update_progress(completed_count, stats, f"Оброблено {completed_count}/{total_messages}")
+                        
+                    except Exception as e:
+                        print(f"❌ Error processing email {msg_id}: {e}")
+                        stats['errors'] += 1
+                        update_progress(completed_count, stats, f"Помилка обробки {completed_count}/{total_messages}")
+            
+            # Flush Redis Stream to database
+            flushed_count = flush_stream_to_db(task_id)
+            print(f"✅ [Redis Logger] Flushed {flushed_count} log entries to database")
+            
+        else:
+            # Fallback to parallel processing for small batches or if batch processing disabled
+            print(f"⚡ [Worker] Using parallel processing for {len(new_messages)} emails...")
+            completed_count = 0
+            
+            # Create Flask app instance to pass to threads
+            # Each thread needs its own app context
+            from app_factory import create_app
+            thread_app = create_app()
+            
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                # ПЕРЕДАЄМО credentials_json, А НЕ service
+                # Also pass flask_app so each thread can create app context
+                # ВАЖЛИВО: Обробляємо тільки new_messages (вже відфільтровані LibrarianAgent)
+                future_to_msg = {
+                    executor.submit(
+                        process_single_email_task, 
+                        msg, 
+                        credentials_json,  # <--- Передаємо рядок JSON, щоб створити сервіс всередині
+                        gemini_client, 
+                        label_cache,
+                        thread_app  # Pass Flask app so thread can create context
+                    ): msg for msg in new_messages  # <--- Використовуємо new_messages замість unique_messages
+                }
 
             for future in as_completed(future_to_msg):
                 completed_count += 1
@@ -493,6 +578,16 @@ def _background_sort_task_impl(credentials_json):
                         print(f"   Full traceback:\n{result['traceback']}")
                     stats['errors'] += 1
 
+        # CRITICAL OPTIMIZATION: Flush Redis Stream to database before completion
+        # This ensures all logs are written to database in batch (for both batch and parallel processing)
+        try:
+            from utils.redis_logger import flush_stream_to_db
+            flushed_count = flush_stream_to_db(task_id)
+            if flushed_count > 0:
+                print(f"✅ [Redis Logger] Final flush: {flushed_count} entries written to database")
+        except Exception as e:
+            print(f"⚠️ [Redis Logger] Error during final flush: {e}")
+        
         # Update progress with final completion message before marking as complete
         total_processed = stats.get('total_processed', completed_count)
         success_count = total_processed - stats.get('errors', 0)

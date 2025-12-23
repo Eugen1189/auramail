@@ -290,7 +290,35 @@ def callback():
         return f'<h1>❌ Помилка при обробці токена</h1><p>Деталі: {str(e)}</p><pre>{error_details}</pre><p><a href="/">Повернутися на головну</a></p>', 500
 
 
-# --- 3. MAIN ROUTE (Home page) ---
+# --- 3. HEALTH CHECK ENDPOINT (for Docker/Kubernetes) ---
+@app.route('/health')
+def health():
+    """
+    Health check endpoint for Docker/Kubernetes.
+    Returns 200 OK if service is healthy.
+    """
+    try:
+        # Check Redis connection
+        redis_conn = Redis.from_url(REDIS_URL)
+        redis_conn.ping()
+        
+        # Check database connection
+        from database import db
+        db.session.execute(db.text('SELECT 1'))
+        
+        return jsonify({
+            'status': 'healthy',
+            'service': 'AuraMail',
+            'version': '1.0.0'
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e)
+        }), 503
+
+
+# --- 4. MAIN ROUTE (Home page) ---
 if app.config.get('TESTING'):
     @app.route('/')
     def index():
@@ -442,7 +470,129 @@ def start_sort_job():
         return jsonify({'status': 'error', 'message': error_msg}), 500
 
 
-# --- 4b. НОВИЙ МАРШРУТ ДЛЯ ЗВІТУ ---
+# --- 4a. EXPORT ROUTES (CSV/PDF) ---
+@app.route('/export/csv')
+def export_csv():
+    """Export sorting results to CSV."""
+    if 'credentials' not in session:
+        return jsonify({'status': 'error', 'message': 'Not authorized'}), 401
+    
+    try:
+        from utils.export import export_to_csv
+        from datetime import datetime as dt
+        
+        # Get optional date filters
+        start_date_str = request.args.get('start_date')
+        end_date_str = request.args.get('end_date')
+        
+        start_date = dt.fromisoformat(start_date_str) if start_date_str else None
+        end_date = dt.fromisoformat(end_date_str) if end_date_str else None
+        
+        csv_buffer = export_to_csv(start_date, end_date)
+        
+        filename = f'auramail_export_{dt.now().strftime("%Y%m%d_%H%M%S")}.csv'
+        
+        from flask import Response
+        return Response(
+            csv_buffer.getvalue(),
+            mimetype='text/csv',
+            headers={'Content-Disposition': f'attachment; filename={filename}'}
+        )
+    except Exception as e:
+        logger.error(f"CSV export error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/export/pdf')
+def export_pdf():
+    """Export sorting results to PDF."""
+    if 'credentials' not in session:
+        return jsonify({'status': 'error', 'message': 'Not authorized'}), 401
+    
+    try:
+        from utils.export import export_to_pdf
+        from datetime import datetime as dt
+        
+        # Get optional date filters
+        start_date_str = request.args.get('start_date')
+        end_date_str = request.args.get('end_date')
+        
+        start_date = dt.fromisoformat(start_date_str) if start_date_str else None
+        end_date = dt.fromisoformat(end_date_str) if end_date_str else None
+        
+        pdf_bytes = export_to_pdf(start_date, end_date)
+        
+        filename = f'auramail_report_{dt.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+        
+        from flask import Response
+        return Response(
+            pdf_bytes,
+            mimetype='application/pdf',
+            headers={'Content-Disposition': f'attachment; filename={filename}'}
+        )
+    except ImportError as e:
+        logger.error(f"PDF export error: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'PDF export requires reportlab. Install with: pip install reportlab'
+        }), 500
+    except Exception as e:
+        logger.error(f"PDF export error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+# --- 4b. ANALYTICS API ENDPOINTS ---
+@app.route('/api/analytics/time-savings')
+def api_time_savings():
+    """Returns time savings analytics."""
+    if 'credentials' not in session:
+        return jsonify({'status': 'error', 'message': 'Not authorized'}), 401
+    
+    try:
+        days = int(request.args.get('days', 30))
+        from utils.analytics import calculate_time_savings
+        return jsonify(calculate_time_savings(days))
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/analytics/roi')
+def api_roi():
+    """Returns ROI analytics."""
+    if 'credentials' not in session:
+        return jsonify({'status': 'error', 'message': 'Not authorized'}), 401
+    
+    try:
+        days = int(request.args.get('days', 30))
+        from utils.analytics import calculate_roi
+        return jsonify(calculate_roi(days))
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/analytics/chart-data')
+def api_chart_data():
+    """Returns chart data for Dashboard 2.0."""
+    if 'credentials' not in session:
+        return jsonify({'status': 'error', 'message': 'Not authorized'}), 401
+    
+    try:
+        days = int(request.args.get('days', 30))
+        chart_type = request.args.get('type', 'time-savings')
+        
+        from utils.analytics import get_time_savings_chart_data, get_category_distribution
+        
+        if chart_type == 'time-savings':
+            return jsonify(get_time_savings_chart_data(days))
+        elif chart_type == 'category-distribution':
+            return jsonify(get_category_distribution(days))
+        else:
+            return jsonify({'status': 'error', 'message': 'Invalid chart type'}), 400
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+# --- 4c. REPORT ROUTE ---
 @app.route('/report')
 @cache.cached(timeout=CACHE_ACTION_HISTORY_TIMEOUT, key_prefix='report_page')
 def show_report():
