@@ -103,102 +103,105 @@ jobs:
           docker tag auramail:${{ github.sha }} auramail:latest
         continue-on-error: true
 
-  deploy_production:
-    name: Deploy to Production
-    needs: build_and_test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-      
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.PROD_HOST }}
-          username: ${{ secrets.PROD_USERNAME }}
-          key: ${{ secrets.PROD_SSH_KEY }}
-          port: ${{ secrets.PROD_SSH_PORT || 22 }}
-          script: |
-            set -e
-            echo "🚀 Starting deployment to production..."
-            
-            # Navigate to application directory
-            cd /var/www/auramail || cd /home/${{ secrets.PROD_USERNAME }}/auramail || { echo "❌ Application directory not found"; exit 1; }
-            
-            # 1. Pull latest code from main branch
-            echo "📥 Pulling latest code..."
-            git fetch origin
-            git reset --hard origin/main
-            git clean -fd
-            
-            # 2. Activate virtual environment (if exists)
-            if [ -d "venv" ]; then
-              source venv/bin/activate
-            elif [ -d ".venv" ]; then
-              source .venv/bin/activate
-            fi
-            
-            # 3. Install/Update dependencies
-            echo "📦 Installing dependencies..."
-            pip install -r requirements.txt --quiet
-            
-            # 4. Run database migrations
-            echo "🗄️ Running database migrations..."
-            alembic upgrade head || echo "⚠️ Migration failed, but continuing..."
-            
-            # 5. Restart production services
-            echo "🔄 Restarting services..."
-            sudo systemctl restart auramail-web.service || echo "⚠️ Web service restart failed"
-            sudo systemctl restart auramail-worker.service || echo "⚠️ Worker service restart failed"
-            
-            # 6. Check service status
-            echo "✅ Checking service status..."
-            sudo systemctl status auramail-web.service --no-pager -l || true
-            sudo systemctl status auramail-worker.service --no-pager -l || true
-            
-            echo "✅ Deployment completed successfully!"
-        continue-on-error: false
+  # TEMPORARILY DISABLED: Deploy jobs commented out to avoid SSH errors
+  # Uncomment when SSH secrets are configured in GitHub repository settings
+  #
+  # deploy_production:
+  #   name: Deploy to Production
+  #   needs: build_and_test
+  #   if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+  #   runs-on: ubuntu-latest
+  #   
+  #   steps:
+  #     - name: Checkout Code
+  #       uses: actions/checkout@v4
+  #     
+  #     - name: Deploy via SSH
+  #       uses: appleboy/ssh-action@v1.0.3
+  #       with:
+  #         host: ${{ secrets.PROD_HOST }}
+  #         username: ${{ secrets.PROD_USERNAME }}
+  #         key: ${{ secrets.PROD_SSH_KEY }}
+  #         port: ${{ secrets.PROD_SSH_PORT || 22 }}
+  #         script: |
+  #           set -e
+  #           echo "🚀 Starting deployment to production..."
+  #           
+  #           # Navigate to application directory
+  #           cd /var/www/auramail || cd /home/${{ secrets.PROD_USERNAME }}/auramail || { echo "❌ Application directory not found"; exit 1; }
+  #           
+  #           # 1. Pull latest code from main branch
+  #           echo "📥 Pulling latest code..."
+  #           git fetch origin
+  #           git reset --hard origin/main
+  #           git clean -fd
+  #           
+  #           # 2. Activate virtual environment (if exists)
+  #           if [ -d "venv" ]; then
+  #             source venv/bin/activate
+  #           elif [ -d ".venv" ]; then
+  #             source .venv/bin/activate
+  #           fi
+  #           
+  #           # 3. Install/Update dependencies
+  #           echo "📦 Installing dependencies..."
+  #           pip install -r requirements.txt --quiet
+  #           
+  #           # 4. Run database migrations
+  #           echo "🗄️ Running database migrations..."
+  #           alembic upgrade head || echo "⚠️ Migration failed, but continuing..."
+  #           
+  #           # 5. Restart production services
+  #           echo "🔄 Restarting services..."
+  #           sudo systemctl restart auramail-web.service || echo "⚠️ Web service restart failed"
+  #           sudo systemctl restart auramail-worker.service || echo "⚠️ Worker service restart failed"
+  #           
+  #           # 6. Check service status
+  #           echo "✅ Checking service status..."
+  #           sudo systemctl status auramail-web.service --no-pager -l || true
+  #           sudo systemctl status auramail-worker.service --no-pager -l || true
+  #           
+  #           echo "✅ Deployment completed successfully!"
+  #       continue-on-error: false
 
-  deploy_staging:
-    name: Deploy to Staging
-    needs: build_and_test
-    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-      
-      - name: Deploy via SSH (Staging)
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.STAGING_HOST }}
-          username: ${{ secrets.STAGING_USERNAME }}
-          key: ${{ secrets.STAGING_SSH_KEY }}
-          port: ${{ secrets.STAGING_SSH_PORT || 22 }}
-          script: |
-            set -e
-            echo "🚀 Starting deployment to staging..."
-            
-            cd /var/www/auramail-staging || cd /home/${{ secrets.STAGING_USERNAME }}/auramail-staging || { echo "❌ Staging directory not found"; exit 1; }
-            
-            git fetch origin
-            git reset --hard origin/develop
-            git clean -fd
-            
-            if [ -d "venv" ]; then
-              source venv/bin/activate
-            elif [ -d ".venv" ]; then
-              source .venv/bin/activate
-            fi
-            
-            pip install -r requirements.txt --quiet
-            alembic upgrade head || echo "⚠️ Migration failed"
-            
-            sudo systemctl restart auramail-staging-web.service || true
-            sudo systemctl restart auramail-staging-worker.service || true
-            
-            echo "✅ Staging deployment completed!"
-        continue-on-error: true
+  # deploy_staging:
+  #   name: Deploy to Staging
+  #   needs: build_and_test
+  #   if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+  #   runs-on: ubuntu-latest
+  #   
+  #   steps:
+  #     - name: Checkout Code
+  #       uses: actions/checkout@v4
+  #     
+  #     - name: Deploy via SSH (Staging)
+  #       uses: appleboy/ssh-action@v1.0.3
+  #       with:
+  #         host: ${{ secrets.STAGING_HOST }}
+  #         username: ${{ secrets.STAGING_USERNAME }}
+  #         key: ${{ secrets.STAGING_SSH_KEY }}
+  #         port: ${{ secrets.STAGING_SSH_PORT || 22 }}
+  #         script: |
+  #           set -e
+  #           echo "🚀 Starting deployment to staging..."
+  #           
+  #           cd /var/www/auramail-staging || cd /home/${{ secrets.STAGING_USERNAME }}/auramail-staging || { echo "❌ Staging directory not found"; exit 1; }
+  #           
+  #           git fetch origin
+  #           git reset --hard origin/develop
+  #           git clean -fd
+  #           
+  #           if [ -d "venv" ]; then
+  #             source venv/bin/activate
+  #           elif [ -d ".venv" ]; then
+  #             source .venv/bin/activate
+  #           fi
+  #           
+  #           pip install -r requirements.txt --quiet
+  #           alembic upgrade head || echo "⚠️ Migration failed"
+  #           
+  #           sudo systemctl restart auramail-staging-web.service || true
+  #           sudo systemctl restart auramail-staging-worker.service || true
+  #           
+  #           echo "✅ Staging deployment completed!"
+  #       continue-on-error: true
