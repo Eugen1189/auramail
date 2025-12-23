@@ -1,0 +1,93 @@
+{
+  "test_cases": [
+    {
+      "id": "hidden_action_1",
+      "description": "Newsletter with hidden action request at the end",
+      "subject": "Weekly Tech News - January 2025",
+      "content": "Доброго дня! Ось найцікавіші новини зі світу технологій цього тижня:\n\n1. Новий iPhone вийшов на ринок\n2. Google анонсував новий AI\n3. Microsoft запустив новий сервіс\n\nДякуємо за увагу!\n\nP.S. Підтвердьте вашу присутність на зустрічі до завтра.",
+      "sender": "newsletter@techcompany.com",
+      "expected_category": "ACTION_REQUIRED",
+      "expected_action": "MOVE",
+      "expected_urgency": "MEDIUM",
+      "reason": "Contains action request 'Підтвердьте вашу присутність до завтра' despite newsletter format"
+    },
+    {
+      "id": "hidden_action_2",
+      "description": "Marketing email with deadline at the end",
+      "subject": "Special Offer - 50% Discount",
+      "content": "Шановні клієнти!\n\nМи маємо для вас спеціальну пропозицію - знижка 50% на всі товари!\n\nПерегляньте наш каталог та оберіть те, що вам потрібно.\n\nЗ повагою,\nКоманда магазину\n\n⚠️ Важливо: Підтвердіть замовлення до 15 січня, інакше воно буде скасовано.",
+      "sender": "sales@store.com",
+      "expected_category": "ACTION_REQUIRED",
+      "expected_action": "MOVE",
+      "expected_urgency": "HIGH",
+      "reason": "Contains deadline 'до 15 січня' with cancellation consequence"
+    },
+    {
+      "id": "hidden_action_3",
+      "description": "Newsletter that looks like action required",
+      "subject": "Monthly Newsletter - December Updates",
+      "content": "Вітаємо! Ось наші новини за грудень:\n\n- Запущено новий продукт\n- Оновлено інтерфейс\n- Додано нові функції\n\nДякуємо за підтримку!\n\nЗ найкращими побажаннями,\nКоманда",
+      "sender": "newsletter@company.com",
+      "expected_category": "NEWSLETTER",
+      "expected_action": "ARCHIVE",
+      "expected_urgency": "LOW",
+      "reason": "Pure newsletter without any action requests"
+    },
+    {
+      "id": "hidden_action_4",
+      "description": "Social notification with action request",
+      "subject": "You have a new message",
+      "content": "Привіт!\n\nУ вас є нове повідомлення в соціальній мережі.\n\nПерейдіть за посиланням, щоб прочитати.\n\nТакож, будь ласка, підтвердіть ваш профіль до кінця тижня.",
+      "sender": "noreply@socialnetwork.com",
+      "expected_category": "ACTION_REQUIRED",
+      "expected_action": "MOVE",
+      "expected_urgency": "MEDIUM",
+      "reason": "Contains action request 'підтвердіть ваш профіль до кінця тижня'"
+    },
+    {
+      "id": "hidden_action_5",
+      "description": "Bill notification disguised as newsletter",
+      "subject": "Your Account Statement",
+      "content": "Шановний клієнт!\n\nОсь ваш щомісячний звіт про стан рахунку.\n\nБаланс: 1500 UAH\n\nДякуємо за користування нашими послугами!\n\nP.S. Будь ласка, оплатіть рахунок до 20 січня.",
+      "sender": "billing@bank.com",
+      "expected_category": "ACTION_REQUIRED",
+      "expected_action": "MOVE",
+      "expected_urgency": "HIGH",
+      "reason": "Contains payment deadline 'до 20 січня'"
+    },
+    {
+      "id": "hidden_action_6",
+      "description": "Newsletter with RSVP request",
+      "subject": "Event Invitation - Tech Conference 2025",
+      "content": "Вітаємо!\n\nЗапрошуємо вас на конференцію з технологій, яка відбудеться 25 січня.\n\nПрограма:\n- Доповіді про AI\n- Воркшопи\n- Нетворкінг\n\nБудь ласка, підтвердіть вашу присутність до 20 січня.",
+      "sender": "events@techconf.com",
+      "expected_category": "ACTION_REQUIRED",
+      "expected_action": "MOVE",
+      "expected_urgency": "MEDIUM",
+      "reason": "Contains RSVP request 'підтвердіть вашу присутність до 20 січня'"
+    },
+    {
+      "id": "hidden_action_7",
+      "description": "Pure newsletter without action",
+      "subject": "Weekly Digest - Tech News",
+      "content": "Ось що цікавого сталося цього тижня:\n\n1. Нові технології\n2. Індустрійні новини\n3. Огляди продуктів\n\nДякуємо за читання!",
+      "sender": "digest@technews.com",
+      "expected_category": "NEWSLETTER",
+      "expected_action": "ARCHIVE",
+      "expected_urgency": "LOW",
+      "reason": "Pure newsletter content without any action requests"
+    },
+    {
+      "id": "hidden_action_8",
+      "description": "Newsletter with survey request",
+      "subject": "Your Opinion Matters",
+      "content": "Шановні користувачі!\n\nМи хочемо дізнатися вашу думку про наш сервіс.\n\nЗаповніть коротке опитування (5 хвилин) та допоможіть нам покращити продукт.\n\nДякуємо!\n\nP.S. Опитування доступне до п'ятниці.",
+      "sender": "feedback@company.com",
+      "expected_category": "ACTION_REQUIRED",
+      "expected_action": "MOVE",
+      "expected_urgency": "LOW",
+      "reason": "Contains survey request with deadline 'до п'ятниці'"
+    }
+  ]
+}
+
