@@ -13,6 +13,38 @@ from database import ActionLog, db
 from utils.db_logger import get_action_history, get_daily_stats
 
 
+def calculate_stats(start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> Dict:
+    """
+    Calculates statistics from action logs.
+    
+    Args:
+        start_date: Optional start date filter
+        end_date: Optional end date filter
+    
+    Returns:
+        Dictionary with statistics
+    """
+    query = ActionLog.query
+    
+    if start_date:
+        query = query.filter(ActionLog.created_at >= start_date)
+    if end_date:
+        query = query.filter(ActionLog.created_at <= end_date)
+    
+    logs = query.all()
+    
+    return {
+        'total_processed': len(logs),
+        'important': sum(1 for log in logs if log.ai_category == 'IMPORTANT'),
+        'action_required': sum(1 for log in logs if log.ai_category == 'ACTION_REQUIRED'),
+        'newsletter': sum(1 for log in logs if log.ai_category == 'NEWSLETTER'),
+        'social': sum(1 for log in logs if log.ai_category == 'SOCIAL'),
+        'review': sum(1 for log in logs if log.ai_category == 'REVIEW'),
+        'archived': sum(1 for log in logs if log.action_taken in ('ARCHIVE', 'DELETE')),
+        'errors': sum(1 for log in logs if log.action_taken and 'ERROR' in log.action_taken)
+    }
+
+
 def export_to_csv(start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> io.StringIO:
     """
     Exports sorting results to CSV format.
@@ -118,8 +150,8 @@ def export_to_pdf(start_date: Optional[datetime] = None, end_date: Optional[date
         elements.append(date_para)
         elements.append(Spacer(1, 0.3*inch))
         
-        # Get statistics
-        stats = calculate_stats()
+        # Get statistics (with date filters if provided)
+        stats = calculate_stats(start_date, end_date)
         
         # Add summary statistics
         summary_data = [
