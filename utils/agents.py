@@ -391,6 +391,57 @@ class SecurityGuardAgent:
             has_explicit_link = bool(re.search(r'http[s]?://', full_text, re.IGNORECASE))
             has_password_request = bool(re.search(r'(?i)(password|пароль|введіть пароль|enter password)', full_text))
             
+            # CRITICAL ENHANCEMENT: Social Engineering Detection
+            # "Urgency + Link" pattern is a high-risk indicator of social engineering
+            # Even if domain looks familiar, urgent requests with links are suspicious
+            has_urgency_keywords = bool(re.search(r'(?i)\b(urgent|терміново|asap|негайно|швидко|quickly|immediately)\b', full_text))
+            
+            # Check if links are internal (safer) vs external (more suspicious)
+            urls = SecurityGuardAgent._extract_urls(full_text)
+            has_internal_link = False
+            has_external_link = False
+            
+            # Extract sender domain for comparison
+            sender_domain = sender.split('@')[-1].lower() if '@' in sender else ''
+            
+            for url_info in urls:
+                url = url_info['url'].lower()
+                # Extract domain from URL
+                try:
+                    from urllib.parse import urlparse
+                    url_domain = urlparse(url).netloc.lower()
+                    # Remove port if present
+                    if ':' in url_domain:
+                        url_domain = url_domain.split(':')[0]
+                except Exception:
+                    url_domain = ''
+                
+                # Check if URL domain matches sender domain (internal link)
+                # Also check for common internal patterns: internal.*, *.internal, intranet, etc.
+                is_internal = False
+                if sender_domain:
+                    # Direct match: company.com in url contains company.com
+                    if sender_domain in url_domain or url_domain in sender_domain:
+                        is_internal = True
+                    # Common internal patterns
+                    elif any(pattern in url_domain for pattern in ['internal', 'intranet', 'local', 'corp', 'vpn']):
+                        is_internal = True
+                    # Check if base domain matches (company.com vs internal.company.com)
+                    elif '.' in sender_domain and '.' in url_domain:
+                        sender_base = sender_domain.split('.')[-2:]  # ['company', 'com']
+                        url_base = url_domain.split('.')[-2:] if '.' in url_domain else []
+                        if sender_base == url_base:
+                            is_internal = True
+                
+                if is_internal:
+                    has_internal_link = True
+                else:
+                    has_external_link = True
+            
+            # Social engineering pattern: urgency + external link (more suspicious)
+            # Urgency + internal link is less suspicious but still flagged
+            has_social_engineering_pattern = has_urgency_keywords and (has_external_link or (has_internal_link and not has_external_link))
+            
             for pattern, weight in SecurityGuardAgent.SUSPICIOUS_PATTERNS:
                 matches = re.findall(pattern, full_text, re.IGNORECASE)
                 if matches:
@@ -412,14 +463,34 @@ class SecurityGuardAgent:
                     found_patterns.append(f"suspicious_url:{url_info['url'][:50]}")
             suspicious_score += url_total_score
             
+            # CRITICAL ENHANCEMENT: Social Engineering Detection
+            # "Urgency + Link" pattern is a high-risk indicator
+            # This catches emails like "URGENT: Please review report at [link]" from colleagues
+            if has_social_engineering_pattern:
+                if has_external_link:
+                    # High score for urgency + external link (very suspicious)
+                    suspicious_score += 5  # Significant boost for social engineering pattern
+                    found_patterns.append("social_engineering_urgency_external_link")
+                    print(f"🚨 [Security Guard] Social Engineering detected: Urgency + External Link pattern")
+                elif has_internal_link:
+                    # Moderate score for urgency + internal link (less suspicious but still flagged as MEDIUM)
+                    # Need to reach >= 5 for MEDIUM threat level
+                    suspicious_score += 3  # Moderate boost for internal links (ensures MEDIUM threat)
+                    found_patterns.append("social_engineering_urgency_internal_link")
+                    print(f"⚠️ [Security Guard] Social Engineering detected: Urgency + Internal Link pattern")
+            
             # Technical header validation: Check Reply-To vs From
             if reply_to and reply_to.lower() != sender_lower:
                 # Different Reply-To than From is suspicious (common in phishing)
                 domain_from = sender.split('@')[-1] if '@' in sender else ''
                 domain_reply = reply_to.split('@')[-1] if '@' in reply_to else ''
                 if domain_from != domain_reply:
-                    suspicious_score += 2  # Reduced from 3
+                    suspicious_score += 3  # Increased from 2 - reply-to mismatch is more suspicious
                     found_patterns.append("reply_to_mismatch")
+                    # CRITICAL: Reply-to mismatch + urgency + link = very high risk
+                    if has_social_engineering_pattern:
+                        suspicious_score += 2  # Additional boost for combined pattern
+                        found_patterns.append("social_engineering_reply_mismatch")
             
             # CRITICAL FIX: Cap score at 3 ONLY if no explicit links, password requests, OR suspicious domains
             # BUT: Allow higher scores if we have brand + verification patterns (phishing indicators)
@@ -439,8 +510,8 @@ class SecurityGuardAgent:
             # This allows "verify your account" to score >= 5 for medium threat test
             has_verify_account = bool(re.search(r'(?i)(verify|verification).*(account|update|required)', full_text))
             
-            # Only cap if no high-risk indicators AND no brand+verification pattern AND no verify+account pattern
-            if not has_explicit_link and not has_password_request and not has_suspicious_domain and not has_brand_verification and not has_verify_account:
+            # Only cap if no high-risk indicators AND no brand+verification pattern AND no verify+account pattern AND no social engineering
+            if not has_explicit_link and not has_password_request and not has_suspicious_domain and not has_brand_verification and not has_verify_account and not has_social_engineering_pattern:
                 suspicious_score = min(suspicious_score, 3)
             
             # OPTIMIZATION: Increased threshold for Gemini calls to reduce false positives
@@ -454,14 +525,21 @@ class SecurityGuardAgent:
                 # This prevents Gemini from interfering with HIGH threat (score >= 10) category assignment
                 # Tests expect score >= 10 to get DANGER category, so we don't want Gemini to change it
                 if suspicious_score < 10:  # Only call Gemini for MEDIUM threat scores
-                    security_prompt = f"""Проаналізуй цей лист на предмет безпеки. Перевір:
+                    # CRITICAL ENHANCEMENT: Enhanced prompt for social engineering detection
+                    reply_to_info = f"\nReply-To: {reply_to}" if reply_to else ""
+                    security_prompt = f"""Проаналізуй цей лист на предмет безпеки та соціальної інженерії. Перевір:
 1. Чи це фішинг?
 2. Чи є підозрілі посилання?
 3. Чи виглядає відправник підозріло?
+4. Чи є комбінація "терміновість + посилання" (ознака соціальної інженерії)?
+5. Чи відправник використовує знайомий домен, але з підозрілими посиланнями?
 
 Тема: {subject}
-Від: {sender}
+Від: {sender}{reply_to_info}
 Вміст: {email_content[:1000]}
+
+ВАЖЛИВО: Листи з терміновістю та посиланнями від "колег" часто є соціальною інженерією.
+Навіть якщо домен виглядає знайомим, термінові прохання з посиланнями = високий ризик.
 
 Відповідай тільки: SAFE або DANGER"""
                     
