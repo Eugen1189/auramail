@@ -81,16 +81,26 @@ class TestE2EExtended:
     
     def test_report_generation_after_sorting(self, client, app):
         """Test report generation after sorting completes."""
+        import json
+        from datetime import datetime, timedelta
+        
         with patch('utils.db_logger.get_latest_report') as mock_report, \
              patch('utils.db_logger.get_action_history') as mock_history, \
              patch('config.is_production_ready') as mock_prod:
             
-            # Setup authentication
+            # CRITICAL: Setup authentication with full credentials to prevent 302 redirects
             with client.session_transaction() as sess:
-                sess['credentials'] = json.dumps({
-                    'token': 'test_token',
-                    'scopes': ['https://www.googleapis.com/auth/gmail.modify']
-                })
+                mock_credentials = {
+                    'token': 'mock_access_token',
+                    'refresh_token': 'mock_refresh_token',
+                    'token_uri': 'https://oauth2.googleapis.com/token',
+                    'client_id': 'mock_client_id',
+                    'client_secret': 'mock_client_secret',
+                    'scopes': ['https://www.googleapis.com/auth/gmail.readonly'],
+                    'expiry': (datetime.utcnow() + timedelta(hours=1)).isoformat()
+                }
+                sess['credentials'] = json.dumps(mock_credentials)
+                sess.permanent = True
             
             # Mock report data
             mock_report.return_value = {

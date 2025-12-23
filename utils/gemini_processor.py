@@ -208,6 +208,42 @@ CLASSIFICATION_SYSTEM_PROMPT = """
 - Продукт не видаляє листи назавжди - всі листи залишаються доступними у All Mail, лише прибираються з INBOX
 """
 
+# --- Lightweight Prompt for Follow-up Detection (outgoing emails) ---
+FOLLOWUP_SYSTEM_PROMPT = """
+You are a concise assistant that decides if an outgoing email expects a reply and, if yes, by what date.
+
+Return JSON with:
+- expects_reply: boolean (true if the sender expects a response)
+- expected_reply_date: string in YYYY-MM-DD if a date/deadline is mentioned; otherwise empty string
+- confidence: string HIGH|MEDIUM|LOW explaining certainty
+
+Rules:
+- Be conservative: expects_reply=true only when the email clearly asks for confirmation, answer, or next steps.
+- expected_reply_date: extract explicit dates/deadlines; if none, leave empty.
+- Keep output minimal JSON only.
+"""
+
+FOLLOWUP_SCHEMA = types.Schema(
+    type=types.Type.OBJECT,
+    description="Follow-up expectation detection for outgoing email.",
+    properties={
+        "expects_reply": types.Schema(
+            type=types.Type.BOOLEAN,
+            description="True if the sender expects a reply."
+        ),
+        "expected_reply_date": types.Schema(
+            type=types.Type.STRING,
+            description="Date by which a reply is expected (YYYY-MM-DD) or empty string."
+        ),
+        "confidence": types.Schema(
+            type=types.Type.STRING,
+            enum=["HIGH", "MEDIUM", "LOW"],
+            description="Confidence level for the decision."
+        )
+    },
+    required=["expects_reply", "expected_reply_date", "confidence"]
+)
+
 
 def get_gemini_client():
     """
@@ -451,14 +487,37 @@ def classify_email_with_gemini(client: genai.Client, email_content: str) -> dict
             else:
                 print(f"❌ [Gemini API] Failed after all retries [{error_type}]: {error_str[:200]}")
             
+            # Детальне логування причини відмови Gemini
+            error_details = {
+                "error_type": error_type,
+                "error_message": error_str[:500],  # Зберігаємо більше контексту
+                "email_subject": email_content[:100] if email_content else "Unknown",
+                "email_length": len(email_content) if email_content else 0
+            }
+            
+            # Логуємо детальну інформацію про помилку
+            print(f"❌ [Gemini Classification] Помилка класифікації:")
+            print(f"   Тип помилки: {error_type}")
+            print(f"   Повідомлення: {error_str[:300]}")
+            print(f"   Довжина листа: {len(email_content) if email_content else 0} символів")
+            if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str.upper():
+                print(f"   ⚠️ Причина: Rate limit досягнуто або денна квота вичерпана")
+            elif 'INVALID_ARGUMENT' in error_str.upper() or '400' in error_str:
+                print(f"   ⚠️ Причина: Невірний формат запиту або занадто довгий контент")
+            elif 'PERMISSION_DENIED' in error_str.upper() or '403' in error_str:
+                print(f"   ⚠️ Причина: Проблеми з API ключем або дозволами")
+            else:
+                print(f"   ⚠️ Причина: Невідома помилка API")
+            
             return {
                 "category": "REVIEW",
                 "label_name": "AI_REVIEW",
                 "action": "ARCHIVE",
                 "urgency": "MEDIUM",
-                "description": "Класифікація не вдалася через помилку API.",
+                "description": f"Класифікація не вдалася - {error_type}: {error_str[:100]}",
                 "extracted_entities": {},
-                "error": f"{error_type}: {error_str[:150]}"
+                "error": f"{error_type}: {error_str[:150]}",
+                "error_details": error_details  # Додаємо деталі для логування
             }
         
         # Успішний запит, обробляємо response
@@ -515,6 +574,96 @@ def classify_email_with_gemini(client: genai.Client, email_content: str) -> dict
                 "extracted_entities": {},
                 "error": f"JSON parse error: {str(e)}"
             }
+    finally:
+        GEMINI_SEMAPHORE.release()
+
+
+def detect_expected_reply_with_gemini(client: genai.Client, email_content: str) -> dict:
+    """
+    Lightweight detector for outgoing emails to decide if a reply is expected and by when.
+    
+    Returns:
+        dict with:
+        - expects_reply (bool)
+        - expected_reply_date (str, YYYY-MM-DD or "")
+        - confidence (str)
+        - error (optional)
+    """
+    if not client:
+        return {
+            "expects_reply": False,
+            "expected_reply_date": "",
+            "confidence": "LOW",
+            "error": "GEMINI_API_KEY not configured"
+        }
+    
+    # Normalize content
+    try:
+        if isinstance(email_content, bytes):
+            email_content = email_content.decode('utf-8', errors='replace')
+        elif not isinstance(email_content, str):
+            email_content = str(email_content)
+        email_content = email_content.encode('utf-8', errors='replace').decode('utf-8')
+    except Exception:
+        email_content = str(email_content)
+    
+    prompt = f"{FOLLOWUP_SYSTEM_PROMPT}\n\n--- Outgoing Email ---\n{email_content}"
+    
+    # Rate limiting reuse
+    print("🔍 [Follow-up] Checking rate limit before API call...")
+    wait_iteration = 0
+    max_wait_iterations = 60
+    while wait_iteration < max_wait_iterations:
+        if check_gemini_rate_limit():
+            break
+        wait_iteration += 1
+        time.sleep(1.5)
+    if wait_iteration >= max_wait_iterations:
+        return {
+            "expects_reply": False,
+            "expected_reply_date": "",
+            "confidence": "LOW",
+            "error": "Rate limit timeout"
+        }
+    
+    GEMINI_SEMAPHORE.acquire()
+    try:
+        try:
+            config = types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=FOLLOWUP_SCHEMA,
+                temperature=0.2
+            )
+        except Exception:
+            config = {"response_mime_type": "application/json"}
+        
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=[prompt],
+            config=config
+        )
+        raw = response.text if hasattr(response, "text") else str(response)
+        try:
+            parsed = json.loads(raw)
+            return {
+                "expects_reply": bool(parsed.get("expects_reply", False)),
+                "expected_reply_date": parsed.get("expected_reply_date") or "",
+                "confidence": parsed.get("confidence", "LOW")
+            }
+        except Exception:
+            return {
+                "expects_reply": False,
+                "expected_reply_date": "",
+                "confidence": "LOW",
+                "error": "Failed to parse Gemini response"
+            }
+    except Exception as e:
+        return {
+            "expects_reply": False,
+            "expected_reply_date": "",
+            "confidence": "LOW",
+            "error": str(e)
+        }
     finally:
         GEMINI_SEMAPHORE.release()
 

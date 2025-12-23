@@ -64,6 +64,7 @@ Thumbs.db
 *.db
 *.log
 client_secret.json
+followup_credentials.json
 *.json
 !requirements.txt
 !package.json

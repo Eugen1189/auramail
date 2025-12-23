@@ -24,6 +24,10 @@ class ActionLog(db.Model):
     subject = db.Column(db.Text, nullable=False)
     ai_category = db.Column(db.String(50), nullable=False, index=True)
     action_taken = db.Column(db.String(50), nullable=False, index=True)
+    # Follow-up monitor fields
+    is_followup_pending = db.Column(db.Boolean, default=False, nullable=False, index=True)
+    expected_reply_date = db.Column(db.Date, nullable=True, index=True)
+    followup_sent = db.Column(db.Boolean, default=False, nullable=False, index=True)
     reason = db.Column(db.Text)
     details = db.Column(JSON)  # Stores full classification dict
     
@@ -37,6 +41,9 @@ class ActionLog(db.Model):
             'original_subject': self.subject,  # alias
             'ai_category': self.ai_category,
             'action_taken': self.action_taken,
+            'is_followup_pending': self.is_followup_pending,
+            'expected_reply_date': self.expected_reply_date.isoformat() if self.expected_reply_date else None,
+            'followup_sent': self.followup_sent,
             'reason': self.reason,
             'ai_description': self.reason,  # alias
             'details': self.details
@@ -135,13 +142,25 @@ def init_db(app):
     # Configure SQLAlchemy
     app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-        'pool_size': DB_POOL_SIZE,
-        'max_overflow': DB_MAX_OVERFLOW,
-        'pool_recycle': DB_POOL_RECYCLE,
-        'pool_pre_ping': True,  # Verify connections before using
-        'echo': False  # Set to True for SQL query logging
-    }
+    # SQLite doesn't support pool_size and max_overflow
+    # Only set these for non-SQLite databases (PostgreSQL, MySQL, etc.)
+    database_uri = app.config.get('SQLALCHEMY_DATABASE_URI', DATABASE_URL)
+    is_sqlite = database_uri.startswith('sqlite://')
+    
+    if is_sqlite:
+        # SQLite-specific configuration (no connection pooling)
+        app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+            'echo': False  # Set to True for SQL query logging
+        }
+    else:
+        # PostgreSQL/MySQL/etc. - use connection pooling
+        app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+            'pool_size': DB_POOL_SIZE,
+            'max_overflow': DB_MAX_OVERFLOW,
+            'pool_recycle': DB_POOL_RECYCLE,
+            'pool_pre_ping': True,  # Verify connections before using
+            'echo': False  # Set to True for SQL query logging
+        }
     
     # Initialize db with app
     db.init_app(app)

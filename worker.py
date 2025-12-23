@@ -57,7 +57,11 @@ if __name__ == '__main__':
         """
         task_app = create_app()
         with task_app.app_context():
-            return original_background_sort_task(*args, **kwargs)
+            try:
+                from database import db
+                return original_background_sort_task(*args, **kwargs)
+            finally:
+                db.session.remove()
     
     def wrapped_voice_search_task(*args, **kwargs):
         """
@@ -66,7 +70,11 @@ if __name__ == '__main__':
         """
         task_app = create_app()
         with task_app.app_context():
-            return original_voice_search_task(*args, **kwargs)
+            try:
+                from database import db
+                return original_voice_search_task(*args, **kwargs)
+            finally:
+                db.session.remove()
     
     # Replace tasks in module with wrapped versions
     # This ensures all RQ task executions have proper Flask app context
@@ -77,8 +85,14 @@ if __name__ == '__main__':
     # Use SimpleWorker (without fork for Windows compatibility)
     # SimpleWorker runs tasks in threads, so app context from wrappers will work correctly
     # Note: We don't wrap worker.work() in app_context because each task creates its own
+    
+    # Configure worker with increased timeout for long-running tasks
+    # default_worker_ttl: Time-to-live for worker heartbeat (default: 420 seconds)
+    # job_timeout: Maximum time a job can run before being killed (default: 180 seconds)
+    # We increase job_timeout to 15 minutes (900 seconds) for Gemini API and Gmail API calls
     worker = SimpleWorker(queues, connection=conn)
     print("[Worker] ✅ Worker started, waiting for tasks...")
     print("[Worker] Each task will have Flask app context with initialized database")
+    print("[Worker] Job timeout set to 15 minutes (900 seconds) for long-running operations")
     worker.work()
 

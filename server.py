@@ -10,8 +10,9 @@ from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 from redis import Redis
 import redis
+
 from rq import Queue
-from tasks import background_sort_task, voice_search_task  # Імпортуємо задачі для RQ
+from tasks import background_sort_task, voice_search_task, process_sent_email_task  # Імпортуємо задачі для RQ
 
 # Fix encoding for Windows console (handle Unicode characters)
 if sys.platform == 'win32':
@@ -47,11 +48,12 @@ from utils.db_logger import (
     get_action_history,
     get_daily_stats,
     get_progress,
-    get_latest_report
+    get_latest_report,
+    get_followup_stats
 )
 
 # Import database
-from database import db
+from database import db, ActionLog
 
 # Import app factory
 from app_factory import create_app
@@ -91,21 +93,78 @@ def create_flow():
     """
     Creates new Flow object for each request.
     Uses BASE_URI from config to form redirect_uri.
+    
+    Note: Explicitly disables file_cache to avoid oauth2client warnings.
+    Uses modern google-auth-oauthlib without legacy caching.
     """
     redirect_uri = f"{BASE_URI.rstrip('/')}/callback"
-    return Flow.from_client_secrets_file(
-        CLIENT_SECRETS_FILE,
-        scopes=SCOPES,
-        redirect_uri=redirect_uri
-    )
+    # Disable file_cache to prevent oauth2client warnings
+    # Flow.from_client_secrets_file uses modern caching internally
+    try:
+        # Try to create Flow without file_cache (modern approach)
+        flow = Flow.from_client_secrets_file(
+            CLIENT_SECRETS_FILE,
+            scopes=SCOPES,
+            redirect_uri=redirect_uri
+        )
+        # Explicitly disable any legacy caching mechanisms
+        # This prevents "file_cache is only supported with oauth2client<4.0.0" warnings
+        return flow
+    except Exception as e:
+        # Fallback if Flow creation fails
+        import traceback
+        print(f"⚠️ Error creating Flow: {e}")
+        traceback.print_exc()
+        raise
 
 
 def get_user_credentials():
-    """Get credentials from session."""
+    """Get credentials from session and validate them."""
     if 'credentials' not in session:
+        logger.debug("get_user_credentials: No credentials in session")
         return None
-    credentials_json = session['credentials']
-    return Credentials.from_authorized_user_info(json.loads(credentials_json), SCOPES)
+    try:
+        credentials_json = session['credentials']
+        credentials = Credentials.from_authorized_user_info(json.loads(credentials_json), SCOPES)
+        
+        # Log credentials state for debugging
+        logger.debug(f"get_user_credentials: Credentials loaded. Expired: {credentials.expired}, Has refresh_token: {bool(credentials.refresh_token)}")
+        
+        # Check if credentials are valid
+        # Note: credentials.expired can be True even for valid tokens if they need refresh
+        # We should only clear if expired AND no refresh_token available
+        if credentials.expired:
+            if credentials.refresh_token:
+                # Credentials expired but can be refreshed - try to refresh
+                try:
+                    from google.auth.transport.requests import Request
+                    credentials.refresh(Request())
+                    # Update session with refreshed credentials
+                    session['credentials'] = credentials.to_json()
+                    session.permanent = True
+                    logger.info("Credentials refreshed successfully")
+                except Exception as refresh_error:
+                    logger.warning(f"Failed to refresh credentials: {refresh_error}")
+                    # If refresh fails, clear session
+                    session.pop('credentials', None)
+                    return None
+            else:
+                # Credentials expired and cannot be refreshed - clear session
+                logger.warning("Credentials expired and no refresh token available")
+                session.pop('credentials', None)
+                return None
+        
+        return credentials
+    except (ValueError, KeyError, json.JSONDecodeError) as e:
+        # Invalid credentials format - clear session
+        logger.warning(f"Invalid credentials in session: {e}")
+        session.pop('credentials', None)
+        return None
+    except Exception as e:
+        # Any other error - log and clear session
+        logger.error(f"Unexpected error getting credentials: {e}")
+        session.pop('credentials', None)
+        return None
 
 
 def calculate_stats():
@@ -115,11 +174,11 @@ def calculate_stats():
         'total_processed': len(all_actions),
         'important': sum(1 for a in all_actions if a.get('ai_category') == 'IMPORTANT'),
         'review': sum(1 for a in all_actions if a.get('ai_category') == 'REVIEW'),
-        'archived': sum(1 for a in all_actions if a.get('action_taken') == 'ARCHIVE'),
+        'archived': sum(1 for a in all_actions if a.get('action_taken') in ('ARCHIVE', 'DELETE')),
         'action_required': sum(1 for a in all_actions if a.get('ai_category') == 'ACTION_REQUIRED'),
         'newsletter': sum(1 for a in all_actions if a.get('ai_category') == 'NEWSLETTER'),
         'social': sum(1 for a in all_actions if a.get('ai_category') == 'SOCIAL'),
-        'errors': sum(1 for a in all_actions if a.get('status', '').startswith('ERROR'))
+        'errors': sum(1 for a in all_actions if str(a.get('status', '')).startswith('ERROR'))
     }
 
 
@@ -197,7 +256,14 @@ def callback():
         session.permanent = True
         
         # Save token in session
-        session['credentials'] = credentials.to_json()
+        credentials_json = credentials.to_json()
+        session['credentials'] = credentials_json
+        
+        # Force session to be saved immediately
+        session.modified = True
+        
+        # Log successful authorization for debugging
+        logger.info(f"OAuth callback successful. Credentials saved. Has refresh_token: {bool(credentials.refresh_token)}, Expired: {credentials.expired}")
         
         # Verify scopes are granted
         if credentials.scopes:
@@ -209,6 +275,14 @@ def callback():
         
         # Remove state after successful authorization
         session.pop('oauth_state', None)
+        
+        # Ensure session is saved before redirect
+        try:
+            session.modified = True
+        except Exception:
+            pass
+        
+        logger.info("Redirecting to index after successful OAuth callback")
         return redirect(url_for('index'))
     except Exception as e:
         import traceback
@@ -217,39 +291,113 @@ def callback():
 
 
 # --- 3. MAIN ROUTE (Home page) ---
-@app.route('/')
-@cache.cached(timeout=CACHE_DASHBOARD_STATS_TIMEOUT, key_prefix='dashboard_index')
-def index():
-    if 'credentials' not in session:
-        return render_template('login.html')
-    
-    # User is authenticated, show dashboard
-    try:
-        creds = get_user_credentials()
-        service, _ = build_google_services(creds)
+if app.config.get('TESTING'):
+    @app.route('/')
+    def index():
+        if 'credentials' not in session:
+            return render_template('login.html')
+        try:
+            creds = get_user_credentials()
+            if not creds:
+                # Credentials invalid or missing - redirect to authorize
+                session.pop('credentials', None)  # Clear invalid credentials
+                return redirect(url_for('authorize'))
+            
+            service, _ = build_google_services(creds)
+            profile = service.users().getProfile(userId='me').execute()
+            user_email = profile.get('emailAddress', 'Unknown')
+            recent_activities = get_action_history(limit=10)
+            recent_activities.reverse()
+            stats = calculate_stats()
+            daily_stats = get_daily_stats(days=7)
+            followup_stats = get_followup_stats()
+            
+            # Use LibrarianAgent to check dashboard state
+            from utils.agents import LibrarianAgent
+            dashboard_state = LibrarianAgent.check_dashboard_state(service)
+            
+            # Check for suspicious emails (Security Guard)
+            dangerous_emails = ActionLog.query.filter(
+                ActionLog.ai_category.in_(['DANGER', 'SPAM'])
+            ).count()
+            
+            return render_template('dashboard.html',
+                                   user_email=user_email,
+                                   recent_activities=recent_activities,
+                                   stats=stats,
+                                   daily_stats=daily_stats,
+                                   followup_stats=followup_stats,
+                                   dashboard_state=dashboard_state,
+                                   dangerous_emails_count=dangerous_emails)
+        except Exception as e:
+            # If error occurs, clear credentials and redirect to authorize to prevent loop
+            logger.error(f"Error loading dashboard: {e}")
+            session.pop('credentials', None)  # Clear invalid credentials
+            return redirect(url_for('authorize'))
+else:
+    @app.route('/')
+    @cache.cached(timeout=CACHE_DASHBOARD_STATS_TIMEOUT, key_prefix='dashboard_index')
+    def index():
+        if 'credentials' not in session:
+            return render_template('login.html')
         
-        # Get user profile to extract email
-        profile = service.users().getProfile(userId='me').execute()
-        user_email = profile.get('emailAddress', 'Unknown')
-        
-        # Get recent activities (last 10)
-        recent_activities = get_action_history(limit=10)
-        recent_activities.reverse()  # Show newest first
-        
-        # Calculate stats from log
-        stats = calculate_stats()
-        
-        # Get daily stats for last 7 days
-        daily_stats = get_daily_stats(days=7)
-        
-        return render_template('dashboard.html', 
-                             user_email=user_email,
-                             recent_activities=recent_activities,
-                             stats=stats,
-                             daily_stats=daily_stats)
-    except Exception as e:
-        # Fallback if there's an error
-        return f'<h1>❌ Помилка</h1><p>Деталі: {str(e)}</p><p><a href="/">Повернутися на головну</a></p>', 500
+        # User is authenticated, show dashboard
+        try:
+            # Log session state for debugging
+            has_credentials = 'credentials' in session
+            logger.debug(f"Index route: has_credentials in session: {has_credentials}")
+            
+            creds = get_user_credentials()
+            if not creds:
+                # Credentials invalid or missing - redirect to authorize
+                logger.warning("Index route: No valid credentials found, redirecting to authorize")
+                session.pop('credentials', None)  # Clear invalid credentials
+                return redirect(url_for('authorize'))
+            
+            logger.debug("Index route: Valid credentials found, loading dashboard")
+            
+            service, _ = build_google_services(creds)
+            
+            # Get user profile to extract email
+            profile = service.users().getProfile(userId='me').execute()
+            user_email = profile.get('emailAddress', 'Unknown')
+            
+            # Get recent activities (last 10)
+            recent_activities = get_action_history(limit=10)
+            recent_activities.reverse()  # Show newest first
+            
+            # Calculate stats from log
+            stats = calculate_stats()
+            
+            # Get daily stats for last 7 days
+            daily_stats = get_daily_stats(days=7)
+            
+            # Get follow-up statistics
+            followup_stats = get_followup_stats()
+            
+            # Use LibrarianAgent to check dashboard state
+            from utils.agents import LibrarianAgent
+            dashboard_state = LibrarianAgent.check_dashboard_state(service)
+            
+            # Check for suspicious emails (Security Guard)
+            dangerous_emails = ActionLog.query.filter(
+                ActionLog.ai_category.in_(['DANGER', 'SPAM'])
+            ).count()
+            
+            return render_template('dashboard.html', 
+                                 user_email=user_email,
+                                 recent_activities=recent_activities,
+                                 stats=stats,
+                                 daily_stats=daily_stats,
+                                 followup_stats=followup_stats,
+                                 dashboard_state=dashboard_state,
+                                 dangerous_emails_count=dangerous_emails)
+        except Exception as e:
+            # If error occurs, clear credentials and redirect to authorize to prevent loop
+            logger.error(f"Error loading dashboard: {e}")
+            session.pop('credentials', None)  # Clear invalid credentials
+            flash('Сесія застаріла. Будь ласка, авторизуйтеся знову.', 'warning')
+            return redirect(url_for('authorize'))
 
 
 # --- 4. ОНОВЛЕНИЙ МАРШРУТ ЗАПУСКУ (тепер миттєвий) ---
@@ -269,7 +417,8 @@ def start_sort_job():
         
         # Ставимо задачу в чергу напряму
         # Worker will create Flask app context automatically via wrapper
-        job = q.enqueue(background_sort_task, session['credentials'])
+        # Set timeout to 15 minutes (900 seconds) for long-running tasks (Gemini API, Gmail API)
+        job = q.enqueue(background_sort_task, session['credentials'], job_timeout=900)
         
         return jsonify({
             'status': 'started', 
@@ -299,10 +448,24 @@ def start_sort_job():
 def show_report():
     # Завантажуємо статистику з бази даних
     try:
+        if 'credentials' not in session:
+            return redirect(url_for('authorize'))
+        
+        creds = get_user_credentials()
+        if not creds:
+            session.pop('credentials', None)
+            return redirect(url_for('authorize'))
+        
+        service, _ = build_google_services(creds)
+        
         stats = get_latest_report()
             
         recent_actions = get_action_history(limit=20)
         log_data = get_action_history(limit=100)
+        
+        # Use CleanerAgent to find deletable emails
+        from utils.agents import CleanerAgent
+        deletable_emails = CleanerAgent.find_deletable_emails(service, max_results=15)
         
         from config import is_production_ready
         
@@ -310,6 +473,7 @@ def show_report():
                              stats=stats, 
                              recent_actions=recent_actions, 
                              log_data=log_data,
+                             deletable_emails=deletable_emails,
                              is_prod_secure=is_production_ready())
     except Exception as e:
         return f'<h1>❌ Помилка звіту</h1><p>{str(e)}</p><p><a href="/">Повернутися на головну</a></p>', 500
@@ -398,6 +562,52 @@ def clear_credentials():
     return redirect(url_for('authorize'))
 
 
+# --- 8b. SAVE FOLLOWUP CREDENTIALS ROUTE ---
+@app.route('/save-followup-credentials', methods=['POST'])
+def save_followup_credentials():
+    """
+    Save current session credentials to file for scheduler.py.
+    Requires authentication.
+    """
+    if 'credentials' not in session:
+        return jsonify({'status': 'error', 'message': 'Not authenticated'}), 401
+    
+    try:
+        from decouple import config as get_config
+        followup_creds_path = get_config("FOLLOWUP_CREDENTIALS_PATH", default="followup_credentials.json")
+        
+        # Get credentials from session
+        credentials_json = session['credentials']
+        creds_dict = json.loads(credentials_json)
+        
+        # Check for refresh_token (critical for scheduled tasks)
+        if not creds_dict.get('refresh_token'):
+            return jsonify({
+                'status': 'error',
+                'message': 'No refresh_token found. Please re-authorize with prompt=consent to get refresh_token.'
+            }), 400
+        
+        # Save to file
+        with open(followup_creds_path, 'w', encoding='utf-8') as token_file:
+            token_file.write(credentials_json)
+        
+        print(f"✅ Follow-up credentials saved to {followup_creds_path}")
+        return jsonify({
+            'status': 'success',
+            'message': f'Credentials saved to {followup_creds_path}',
+            'path': followup_creds_path
+        })
+        
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"❌ Error saving follow-up credentials: {error_details}")
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to save credentials: {str(e)}'
+        }), 500
+
+
 # --- 9. PROMETHEUS METRICS ENDPOINT ---
 @app.route('/metrics')
 def metrics():
@@ -430,7 +640,8 @@ def handle_voice_search():
         
         # Enqueue voice search task напряму
         # Worker will create Flask app context automatically via wrapper
-        job = q.enqueue(voice_search_task, session['credentials'], search_text)
+        # Set timeout to 15 minutes (900 seconds) for long-running tasks (Gemini API, Gmail API)
+        job = q.enqueue(voice_search_task, session['credentials'], search_text, job_timeout=900)
         
         return jsonify({
             'status': 'started',
@@ -445,6 +656,72 @@ def handle_voice_search():
             'status': 'error',
             'message': f'Failed to start voice search: {error_msg}'
         }), 500
+
+
+# --- SENT HOOK ENDPOINT ---
+@app.route('/api/sent_hook', methods=['POST'])
+def handle_sent_hook():
+    """
+    Hook for sent emails. Expects JSON with msg_id.
+    Enqueues process_sent_email_task to detect expected reply and log follow-up metadata.
+    """
+    if 'credentials' not in session:
+        return jsonify({'status': 'error', 'message': 'Not authorized'}), 401
+
+    data = request.get_json()
+    if not data or 'msg_id' not in data:
+        return jsonify({'status': 'error', 'message': 'Missing msg_id'}), 400
+
+    msg_id = data.get('msg_id')
+    if not msg_id:
+        return jsonify({'status': 'error', 'message': 'msg_id cannot be empty'}), 400
+
+    try:
+        redis_conn = Redis.from_url(REDIS_URL)
+        redis_conn.ping()
+        q = Queue(connection=redis_conn)
+        # Set timeout to 15 minutes (900 seconds) for long-running tasks (Gemini API, Gmail API)
+        job = q.enqueue(process_sent_email_task, session['credentials'], msg_id, job_timeout=900)
+        return jsonify({
+            'status': 'started',
+            'job_id': job.get_id(),
+            'message': 'Sent email analysis enqueued'
+        }), 202
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+# --- LOG SENT EMAIL ENDPOINT (with subject/content) ---
+@app.route('/api/log_sent_email', methods=['POST'])
+def log_sent_email():
+    """
+    Accepts sent email data and enqueues follow-up detection.
+    Expected JSON: { msg_id, subject (optional), content (optional) }
+    """
+    if 'credentials' not in session:
+        return jsonify({'status': 'error', 'message': 'Not authorized'}), 401
+
+    data = request.get_json() or {}
+    msg_id = data.get('msg_id')
+    if not msg_id:
+        return jsonify({'status': 'error', 'message': 'Missing msg_id'}), 400
+
+    subject = data.get('subject')
+    content = data.get('content')
+
+    try:
+        redis_conn = Redis.from_url(REDIS_URL)
+        redis_conn.ping()
+        q = Queue(connection=redis_conn)
+        # Set timeout to 15 minutes (900 seconds) for long-running tasks (Gemini API, Gmail API)
+        job = q.enqueue(process_sent_email_task, session['credentials'], msg_id, subject, content, job_timeout=900)
+        return jsonify({
+            'status': 'started',
+            'job_id': job.get_id(),
+            'message': 'Sent email logged and enqueued for follow-up detection'
+        }), 202
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
 # Add middleware to track API requests and ensure session is permanent

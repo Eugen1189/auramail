@@ -150,14 +150,12 @@ class TestVoiceSearchTask:
     @patch('tasks.build_google_services')
     @patch('tasks.get_message_content')
     @patch('utils.gemini_processor.transform_to_gmail_query')
-    @patch('tasks.create_app_for_worker')
-    def test_voice_search_task_success(self, mock_create_app, mock_transform,
+    def test_voice_search_task_success(self, mock_transform,
                                         mock_get_content, mock_build_services,
                                         mock_find_emails, app):
         """Test successful voice search task execution."""
         from tasks import voice_search_task
         
-        mock_create_app.return_value = app
         mock_transform.return_value = "from:test@example.com"
         
         mock_service = MagicMock()
@@ -195,12 +193,10 @@ class TestVoiceSearchTask:
         assert result['results'][0]['subject'] == 'Subject 1'
     
     @patch('utils.gemini_processor.transform_to_gmail_query')
-    @patch('tasks.create_app_for_worker')
-    def test_voice_search_task_empty_query(self, mock_create_app, mock_transform, app):
+    def test_voice_search_task_empty_query(self, mock_transform, app):
         """Test voice search task with empty query transformation."""
         from tasks import voice_search_task
         
-        mock_create_app.return_value = app
         mock_transform.return_value = ""  # Empty query
         
         credentials_json = json.dumps({
@@ -216,10 +212,10 @@ class TestVoiceSearchTask:
         assert 'results' in result
         assert len(result['results']) == 0
     
+    @patch('tasks.create_app')
     @patch('utils.gemini_processor.transform_to_gmail_query')
     @patch('tasks.build_google_services')
-    @patch('tasks.create_app_for_worker')
-    def test_voice_search_task_service_error(self, mock_create_app, mock_build_services, mock_transform, app):
+    def test_voice_search_task_service_error(self, mock_build_services, mock_transform, mock_create_app, app):
         """Test voice search task handles service build errors."""
         from tasks import voice_search_task
         
@@ -238,15 +234,16 @@ class TestVoiceSearchTask:
         assert result['status'] == 'error'
         assert 'error' in result
     
-    @patch('utils.gmail_api.find_emails_by_query')
-    @patch('tasks.build_google_services')
-    @patch('utils.gemini_processor.transform_to_gmail_query')
-    @patch('tasks.get_message_content')
+    @patch('tasks.create_app')
     @patch('google.oauth2.credentials.Credentials.from_authorized_user_info')
-    @patch('tasks.create_app_for_worker')
-    def test_voice_search_task_message_content_error(self, mock_create_app, mock_credentials,
-                                                      mock_get_content, mock_transform, 
-                                                      mock_build_services, mock_find_emails, app):
+    @patch('tasks.get_message_content')
+    @patch('utils.gemini_processor.transform_to_gmail_query')
+    @patch('tasks.build_google_services')
+    @patch('utils.gmail_api.find_emails_by_query')
+    def test_voice_search_task_message_content_error(self, mock_find_emails,
+                                                      mock_build_services, mock_transform, 
+                                                      mock_get_content, mock_credentials,
+                                                      mock_create_app, app):
         """Test voice search task handles message content retrieval errors."""
         from tasks import voice_search_task
         from google.oauth2.credentials import Credentials
@@ -292,12 +289,12 @@ class TestVoiceSearchTask:
         # Second result should have error placeholder
         assert result['results'][1]['subject'] == 'Error loading'
     
-    @patch('tasks.create_app_for_worker')
-    def test_voice_search_task_exception_handling(self, mock_create_app, app):
+    @patch('tasks.build_google_services')
+    def test_voice_search_task_exception_handling(self, mock_services, app):
         """Test voice search task handles unexpected exceptions."""
         from tasks import voice_search_task
         
-        mock_create_app.side_effect = Exception("Unexpected error")
+        mock_services.side_effect = Exception("Unexpected error")
         
         credentials_json = json.dumps({
             'token': 'test_token',
@@ -350,16 +347,22 @@ class TestVoiceSearchEndpoint:
         assert data['job_id'] == 'job-123'
         assert 'message' in data
     
-    def test_voice_search_endpoint_not_authorized(self, client):
+    def test_voice_search_endpoint_not_authorized(self, app):
         """Test /voice/search endpoint requires authentication."""
-        response = client.post('/voice/search',
-                              json={'query': 'знайди листи'},
-                              content_type='application/json')
-        
-        assert response.status_code == 401
-        data = json.loads(response.data)
-        assert data['status'] == 'error'
-        assert 'Not authorized' in data['message']
+        # Create client WITHOUT credentials to test authentication requirement
+        with app.test_client() as client:
+            # Ensure no credentials in session
+            with client.session_transaction() as sess:
+                sess.pop('credentials', None)  # Remove any credentials
+            
+            response = client.post('/voice/search',
+                                  json={'query': 'знайди листи'},
+                                  content_type='application/json')
+            
+            assert response.status_code == 401
+            data = json.loads(response.data)
+            assert data['status'] == 'error'
+            assert 'Not authorized' in data['message']
     
     def test_voice_search_endpoint_missing_query(self, client, app):
         """Test /voice/search endpoint validates query parameter."""

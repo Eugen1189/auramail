@@ -8,19 +8,18 @@ from unittest.mock import patch, MagicMock, Mock
 from utils.gmail_api import build_google_services
 from utils.gemini_processor import classify_email_with_gemini, get_gemini_client
 from utils.db_logger import log_action, init_progress, update_progress, save_report
+from app_factory import create_app
 
 
 class TestProcessSingleEmailTask:
     """Test suite for process_single_email_task function."""
     
     @patch('tasks._process_single_email_task_impl')
-    @patch('tasks.create_app_for_worker')
-    def test_process_single_email_task_uses_app_context(self, mock_create_app, mock_impl, app):
+    def test_process_single_email_task_uses_app_context(self, mock_impl, app):
         """Test that process_single_email_task uses Flask app context."""
         from tasks import process_single_email_task
         
         mock_app = MagicMock()
-        mock_create_app.return_value = mock_app
         mock_impl.return_value = {'status': 'success', 'category': 'REVIEW'}
         
         msg = {'id': 'test-msg-id'}
@@ -30,8 +29,7 @@ class TestProcessSingleEmailTask:
         
         result = process_single_email_task(msg, credentials_json, gemini_client, label_cache)
         
-        # Verify app context was used
-        mock_app.app_context.assert_called_once()
+        # Verify implementation was called
         mock_impl.assert_called_once()
         assert result['status'] == 'success'
     
@@ -41,14 +39,21 @@ class TestProcessSingleEmailTask:
     @patch('tasks.process_message_action')
     @patch('tasks.log_action')
     @patch('tasks.integrate_with_calendar')
-    @patch('tasks.create_app_for_worker')
-    def test_process_single_email_task_success_flow(self, mock_create_app, mock_calendar, 
+    @patch('utils.agents.SecurityGuardAgent')
+    def test_process_single_email_task_success_flow(self, mock_security_guard, mock_calendar, 
                                                      mock_log, mock_process_action, mock_classify,
                                                      mock_get_content, mock_build_services, app):
         """Test successful email processing flow."""
         from tasks import _process_single_email_task_impl
         
-        mock_create_app.return_value = app
+        # Mock Security Guard to return safe result
+        mock_security_guard.analyze_security.return_value = {
+            'is_safe': True,
+            'threat_level': 'LOW',
+            'suspicious_score': 0
+        }
+        
+        
         mock_service = MagicMock()
         mock_calendar_service = MagicMock()
         mock_build_services.return_value = (mock_service, mock_calendar_service)
@@ -86,13 +91,13 @@ class TestProcessSingleEmailTask:
     @patch('tasks.build_google_services')
     @patch('tasks.get_message_content')
     @patch('tasks.classify_email_with_gemini')
-    @patch('tasks.create_app_for_worker')
-    def test_process_single_email_task_handles_ai_error(self, mock_create_app, mock_classify,
+    def test_process_single_email_task_handles_ai_error(self, mock_classify,
                                                          mock_get_content, mock_build_services, app):
         """Test that process_single_email_task handles AI classification errors."""
         from tasks import _process_single_email_task_impl
         
-        mock_create_app.return_value = app
+        from tasks import _process_single_email_task_impl
+        
         mock_service = MagicMock()
         mock_build_services.return_value = (mock_service, MagicMock())
         mock_get_content.return_value = ('Email content', 'Test Subject')

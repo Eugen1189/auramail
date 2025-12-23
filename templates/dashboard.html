@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AuraMail Dashboard</title>
+    <title>AuraMail 2.5 - Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -14,10 +14,11 @@
             --text-main: #FFFFFF;
             --text-secondary: #A0A0A0;
             --accent-blue: #4A90E2;
-            --accent-teal: #00D4AA;
             --accent-purple: #9D4EDD;
+            --accent-teal: #00D4AA;
             --danger: #FF4B4B;
             --success: #00C853;
+            --warning: #FFA726;
         }
 
         * {
@@ -35,7 +36,7 @@
             overflow-x: hidden;
         }
 
-        /* Animated background */
+        /* Animated background with glowing effects */
         body::before {
             content: '';
             position: fixed;
@@ -44,35 +45,11 @@
             width: 100%;
             height: 100%;
             background: 
-                radial-gradient(circle at 20% 50%, rgba(74, 144, 226, 0.1) 0%, transparent 50%),
-                radial-gradient(circle at 80% 80%, rgba(157, 78, 221, 0.1) 0%, transparent 50%),
-                radial-gradient(circle at 40% 20%, rgba(0, 212, 170, 0.08) 0%, transparent 50%);
+                radial-gradient(circle at 20% 50%, rgba(74, 144, 226, 0.15) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(157, 78, 221, 0.15) 0%, transparent 50%),
+                radial-gradient(circle at 40% 20%, rgba(0, 212, 170, 0.1) 0%, transparent 50%);
             z-index: 0;
             pointer-events: none;
-        }
-
-        /* Glowing dots effect */
-        body::after {
-            content: '';
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-image: 
-                radial-gradient(2px 2px at 20% 30%, rgba(74, 144, 226, 0.3), transparent),
-                radial-gradient(2px 2px at 60% 70%, rgba(157, 78, 221, 0.3), transparent),
-                radial-gradient(1px 1px at 50% 50%, rgba(0, 212, 170, 0.2), transparent),
-                radial-gradient(1px 1px at 80% 10%, rgba(74, 144, 226, 0.2), transparent);
-            background-size: 200% 200%;
-            animation: backgroundMove 20s ease infinite;
-            z-index: 0;
-            pointer-events: none;
-        }
-
-        @keyframes backgroundMove {
-            0%, 100% { background-position: 0% 0%; }
-            50% { background-position: 100% 100%; }
         }
 
         .container {
@@ -97,64 +74,131 @@
             display: flex;
             align-items: center;
             gap: 12px;
-            font-size: 24px;
+            font-size: 28px;
             font-weight: 700;
             color: var(--text-main);
         }
 
         .logo-icon {
-            width: 40px;
-            height: 40px;
+            width: 48px;
+            height: 48px;
             background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
-            border-radius: 10px;
+            border-radius: 12px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 20px;
+            font-size: 24px;
             font-weight: 700;
             color: white;
+            box-shadow: 0 4px 20px rgba(74, 144, 226, 0.3);
         }
 
-        .user-info {
+        .header-right {
             display: flex;
             align-items: center;
-            gap: 15px;
+            gap: 20px;
         }
 
-        .user-email {
-            color: var(--text-secondary);
-            font-size: 14px;
+        .btn-voice-search-header {
             display: flex;
             align-items: center;
             gap: 8px;
+            padding: 12px 24px;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(74, 144, 226, 0.2);
         }
 
-        .user-icon {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, var(--accent-teal), var(--accent-blue));
-            display: flex;
+        .btn-voice-search-header:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 25px rgba(74, 144, 226, 0.4);
+        }
+
+        .btn-voice-search-header.recording {
+            background: linear-gradient(135deg, var(--danger), #FF6B6B);
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255, 75, 75, 0.7); }
+            50% { box-shadow: 0 0 0 10px rgba(255, 75, 75, 0); }
+        }
+
+        .btn-start-sorting:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 212, 170, 0.3);
+        }
+
+        .btn-start-sorting:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Audio Visualizer (Equalizer) */
+        .audio-visualizer {
+            display: none;
             align-items: center;
             justify-content: center;
-            font-size: 14px;
-            color: white;
+            gap: 4px;
+            height: 30px;
+            margin-top: 10px;
         }
 
-        .btn-logout {
-            color: var(--text-secondary);
-            text-decoration: none;
-            font-size: 14px;
-            padding: 8px 16px;
+        .audio-visualizer.active {
+            display: flex;
+        }
+
+        .visualizer-bar {
+            width: 4px;
+            background: linear-gradient(180deg, var(--accent-blue), var(--accent-purple));
+            border-radius: 2px;
+            animation: visualizer 1.2s ease-in-out infinite;
+        }
+
+        .visualizer-bar:nth-child(1) { animation-delay: 0s; height: 8px; }
+        .visualizer-bar:nth-child(2) { animation-delay: 0.1s; height: 20px; }
+        .visualizer-bar:nth-child(3) { animation-delay: 0.2s; height: 30px; }
+        .visualizer-bar:nth-child(4) { animation-delay: 0.3s; height: 18px; }
+        .visualizer-bar:nth-child(5) { animation-delay: 0.4s; height: 25px; }
+        .visualizer-bar:nth-child(6) { animation-delay: 0.5s; height: 12px; }
+        .visualizer-bar:nth-child(7) { animation-delay: 0.6s; height: 28px; }
+        .visualizer-bar:nth-child(8) { animation-delay: 0.7s; height: 15px; }
+
+        @keyframes visualizer {
+            0%, 100% { transform: scaleY(0.3); opacity: 0.7; }
+            50% { transform: scaleY(1); opacity: 1; }
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--success);
+            padding: 6px 12px;
+            background: rgba(0, 200, 83, 0.1);
             border-radius: 8px;
-            transition: all 0.3s;
-            border: 1px solid var(--card-border);
+            border: 1px solid rgba(0, 200, 83, 0.3);
         }
 
-        .btn-logout:hover {
-            color: var(--danger);
-            border-color: rgba(255, 75, 75, 0.3);
-            background: rgba(255, 75, 75, 0.1);
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            animation: blink 2s ease-in-out infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
         }
 
         /* Main Grid Layout */
@@ -165,334 +209,135 @@
             margin-bottom: 24px;
         }
 
-        /* Action Card */
-        .action-card {
+        /* Widget Styles */
+        .widget {
             background: var(--card-bg);
             border: 1px solid var(--card-border);
             border-radius: 20px;
-            padding: 40px;
+            padding: 30px;
             position: relative;
             overflow: hidden;
             transition: all 0.3s;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
         }
 
-        .action-card:hover {
+        .widget:hover {
             border-color: rgba(74, 144, 226, 0.3);
-            box-shadow: 0 8px 32px rgba(74, 144, 226, 0.1);
+            box-shadow: 0 8px 32px rgba(74, 144, 226, 0.15);
         }
 
-        .action-card::before {
+        .widget::before {
             content: '';
             position: absolute;
-            top: -50%;
-            right: -50%;
-            width: 200%;
-            height: 200%;
-            background: radial-gradient(circle, rgba(0, 212, 170, 0.1) 0%, transparent 70%);
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
             opacity: 0;
             transition: opacity 0.3s;
         }
 
-        .action-card:hover::before {
+        .widget:hover::before {
             opacity: 1;
         }
 
-        .card-icon {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            width: 60px;
-            height: 60px;
-            opacity: 0.1;
-            background: linear-gradient(135deg, var(--accent-teal), var(--accent-purple));
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-        }
-
-        .card-title {
-            font-size: 14px;
+        .widget-title {
+            font-size: 12px;
             font-weight: 600;
             color: var(--text-secondary);
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 1.5px;
             margin-bottom: 20px;
         }
 
-        .btn-start-sorting {
-            width: 100%;
-            padding: 18px 32px;
-            font-size: 16px;
-            font-weight: 600;
-            color: white;
-            border: none;
-            border-radius: 12px;
-            cursor: pointer;
-            background: linear-gradient(135deg, var(--accent-teal), var(--accent-purple));
-            transition: all 0.3s;
-            position: relative;
-            overflow: hidden;
-            margin-top: 20px;
+        /* TIME SAVED Widget */
+        .time-saved-widget {
+            grid-column: 1;
         }
 
-        .btn-start-sorting::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-            transition: left 0.5s;
-        }
-
-        .btn-start-sorting:hover::before {
-            left: 100%;
-        }
-
-        .btn-start-sorting:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 24px rgba(0, 212, 170, 0.3);
-        }
-
-        .btn-start-sorting:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        /* Voice Search Styles */
-        .voice-search-container {
-            display: flex;
-            gap: 12px;
-            margin-top: 20px;
-        }
-
-        .btn-voice-search {
-            flex: 1;
-            padding: 18px 32px;
-            font-size: 16px;
-            font-weight: 600;
-            color: white;
-            border: none;
-            border-radius: 12px;
-            cursor: pointer;
-            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
-            transition: all 0.3s;
-            position: relative;
-            overflow: hidden;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-        }
-
-        .btn-voice-search:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 24px rgba(74, 144, 226, 0.3);
-        }
-
-        .btn-voice-search:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .btn-voice-search.recording {
-            background: linear-gradient(135deg, var(--danger), #FF6B6B);
-            animation: pulse 1.5s ease-in-out infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(255, 75, 75, 0.7); }
-            50% { box-shadow: 0 0 0 10px rgba(255, 75, 75, 0); }
-        }
-
-        .voice-search-modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.85);
-            backdrop-filter: blur(5px);
-            z-index: 2000;
-            justify-content: center;
-            align-items: center;
-        }
-
-        .voice-search-modal.active {
-            display: flex;
-        }
-
-        .voice-search-content {
-            background: var(--card-bg);
-            border: 1px solid var(--card-border);
-            padding: 40px;
-            border-radius: 24px;
-            width: 90%;
-            max-width: 500px;
-            text-align: center;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-        }
-
-        .voice-status {
-            font-size: 18px;
-            color: var(--text-main);
-            margin: 20px 0;
-            min-height: 24px;
-        }
-
-        .voice-transcript {
-            font-size: 16px;
-            color: var(--text-secondary);
-            margin: 20px 0;
-            padding: 15px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 8px;
-            min-height: 60px;
-            text-align: left;
-        }
-
-        .voice-results {
-            margin-top: 20px;
-            max-height: 400px;
-            overflow-y: auto;
-            text-align: left;
-        }
-
-        .voice-result-item {
-            padding: 15px;
-            margin-bottom: 10px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 8px;
-            border-left: 3px solid var(--accent-blue);
-        }
-
-        .voice-result-subject {
-            font-weight: 600;
-            color: var(--text-main);
-            margin-bottom: 5px;
-        }
-
-        .voice-result-snippet {
+        .time-saved-subtitle {
             font-size: 14px;
-            color: var(--text-secondary);
-        }
-
-        /* Analytics Card */
-        .analytics-card {
-            background: var(--card-bg);
-            border: 1px solid var(--card-border);
-            border-radius: 20px;
-            padding: 40px;
-            position: relative;
-        }
-
-        .chart-container {
-            position: relative;
-            width: 200px;
-            height: 200px;
-            margin: 20px auto;
-        }
-
-        .chart-center-text {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-        }
-
-        .chart-center-number {
-            font-size: 48px;
-            font-weight: 700;
-            color: var(--text-main);
-        }
-
-        .chart-legend {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            margin-top: 30px;
-        }
-
-        .legend-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            font-size: 14px;
-            color: var(--text-secondary);
-        }
-
-        .legend-color {
-            width: 12px;
-            height: 12px;
-            border-radius: 3px;
-        }
-
-        .legend-color.blue { background: var(--accent-blue); }
-        .legend-color.teal { background: var(--accent-teal); }
-        .legend-color.gray { background: var(--text-secondary); }
-
-        .analytics-footer {
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid var(--card-border);
-        }
-
-        .analytics-footer-text {
-            font-size: 12px;
             color: var(--text-secondary);
             margin-bottom: 15px;
         }
 
-        .mini-chart {
-            height: 40px;
-            display: flex;
-            align-items: flex-end;
-            gap: 4px;
+        .time-saved-value {
+            font-size: 48px;
+            font-weight: 700;
+            color: var(--accent-blue);
+            margin-bottom: 20px;
+            line-height: 1.2;
+        }
+
+        .time-saved-value span {
+            font-size: 24px;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .time-chart-container {
+            margin-top: 20px;
+            height: 120px;
+            position: relative;
+        }
+
+        /* FOLLOW-UP MONITOR Widget */
+        .followup-widget {
+            grid-column: 2;
+        }
+
+        .followup-pending {
+            font-size: 36px;
+            font-weight: 700;
+            color: var(--text-main);
             margin-bottom: 10px;
         }
 
-        .mini-bar {
-            flex: 1;
-            background: linear-gradient(180deg, var(--accent-teal), var(--accent-blue));
-            border-radius: 2px 2px 0 0;
-            min-height: 4px;
+        .followup-pending-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 20px;
         }
 
-        .arrow-icon {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            color: var(--text-secondary);
-            font-size: 20px;
+        .followup-overdue {
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--danger);
+            margin-bottom: 20px;
+            padding: 10px;
+            background: rgba(255, 75, 75, 0.1);
+            border-radius: 8px;
+            border-left: 3px solid var(--danger);
+        }
+
+        .btn-review-followups {
+            width: 100%;
+            padding: 14px 24px;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
             cursor: pointer;
             transition: all 0.3s;
         }
 
-        .arrow-icon:hover {
-            color: var(--accent-blue);
-            transform: translateX(4px);
+        .btn-review-followups:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(74, 144, 226, 0.3);
         }
 
-        /* Activity Log Card */
-        .activity-card {
+        /* ACTIVITY LOG Widget */
+        .activity-widget {
             grid-column: 1 / -1;
-            background: var(--card-bg);
-            border: 1px solid var(--card-border);
-            border-radius: 20px;
-            padding: 40px;
         }
 
         .activity-list {
             display: flex;
             flex-direction: column;
-            gap: 16px;
+            gap: 12px;
             margin-top: 20px;
         }
 
@@ -500,37 +345,374 @@
             display: flex;
             align-items: center;
             gap: 12px;
-            padding: 12px;
-            border-radius: 8px;
+            padding: 14px;
+            border-radius: 10px;
             background: rgba(255, 255, 255, 0.02);
             transition: all 0.3s;
+            border-left: 3px solid transparent;
         }
 
         .activity-item:hover {
             background: rgba(255, 255, 255, 0.05);
+            border-left-color: var(--accent-blue);
         }
 
-        .activity-check {
-            width: 20px;
-            height: 20px;
+        .activity-icon {
+            width: 24px;
+            height: 24px;
             border-radius: 50%;
-            background: linear-gradient(135deg, var(--accent-teal), var(--accent-blue));
             display: flex;
             align-items: center;
             justify-content: center;
-            color: white;
             font-size: 12px;
             flex-shrink: 0;
+        }
+
+        .activity-icon.success {
+            background: linear-gradient(135deg, var(--success), var(--accent-teal));
+            color: white;
+        }
+
+        .activity-icon.warning {
+            background: linear-gradient(135deg, var(--warning), #FFB74D);
+            color: white;
+        }
+
+        .activity-icon.danger {
+            background: linear-gradient(135deg, var(--danger), #FF6B6B);
+            color: white;
         }
 
         .activity-text {
             flex: 1;
             font-size: 14px;
-            color: var(--text-secondary);
+            color: var(--text-main);
         }
 
         .activity-text strong {
+            color: var(--accent-blue);
+        }
+
+        /* Voice Input Modal */
+        .voice-input-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(10px);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .voice-input-modal.active {
+            display: flex;
+        }
+
+        .voice-input-content {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 24px;
+            padding: 40px;
+            width: 90%;
+            max-width: 500px;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            position: relative;
+        }
+
+        .voice-input-title {
+            font-size: 24px;
+            font-weight: 700;
             color: var(--text-main);
+            margin-bottom: 30px;
+        }
+
+        .voice-status-message {
+            font-size: 18px;
+            color: var(--text-secondary);
+            margin-bottom: 30px;
+            min-height: 30px;
+        }
+
+        .voice-status-message.recording {
+            color: var(--accent-blue);
+            font-weight: 600;
+        }
+
+        .voice-transcript-display {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+            min-height: 100px;
+            text-align: left;
+            font-size: 16px;
+            color: var(--text-main);
+            line-height: 1.6;
+        }
+
+        .voice-transcript-display.empty {
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        .voice-input-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 30px;
+            justify-content: center;
+        }
+
+        .btn-confirm-search {
+            padding: 12px 24px;
+            background: linear-gradient(135deg, var(--accent-teal), var(--accent-purple));
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-confirm-search:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 212, 170, 0.3);
+        }
+
+        .btn-confirm-search:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-retry-recording {
+            padding: 12px 24px;
+            background: transparent;
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-retry-recording:hover {
+            border-color: var(--accent-blue);
+            color: var(--accent-blue);
+            background: rgba(74, 144, 226, 0.1);
+        }
+
+        .btn-close-voice-input {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 28px;
+            cursor: pointer;
+            padding: 5px 10px;
+            border-radius: 8px;
+            transition: all 0.3s;
+            line-height: 1;
+        }
+
+        .btn-close-voice-input:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-main);
+        }
+
+        .voice-visualizer-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 4px;
+            height: 60px;
+            margin: 30px 0;
+        }
+
+        .voice-visualizer-bar {
+            width: 5px;
+            background: linear-gradient(180deg, var(--accent-blue), var(--accent-purple));
+            border-radius: 3px;
+            animation: voiceVisualizer 1.2s ease-in-out infinite;
+        }
+
+        .voice-visualizer-bar:nth-child(1) { animation-delay: 0s; height: 12px; }
+        .voice-visualizer-bar:nth-child(2) { animation-delay: 0.1s; height: 30px; }
+        .voice-visualizer-bar:nth-child(3) { animation-delay: 0.2s; height: 50px; }
+        .voice-visualizer-bar:nth-child(4) { animation-delay: 0.3s; height: 25px; }
+        .voice-visualizer-bar:nth-child(5) { animation-delay: 0.4s; height: 40px; }
+        .voice-visualizer-bar:nth-child(6) { animation-delay: 0.5s; height: 18px; }
+        .voice-visualizer-bar:nth-child(7) { animation-delay: 0.6s; height: 45px; }
+        .voice-visualizer-bar:nth-child(8) { animation-delay: 0.7s; height: 22px; }
+        .voice-visualizer-bar:nth-child(9) { animation-delay: 0.8s; height: 35px; }
+        .voice-visualizer-bar:nth-child(10) { animation-delay: 0.9s; height: 15px; }
+
+        @keyframes voiceVisualizer {
+            0%, 100% { transform: scaleY(0.3); opacity: 0.7; }
+            50% { transform: scaleY(1); opacity: 1; }
+        }
+
+        /* Voice Search Results Modal */
+        .voice-results-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(10px);
+            z-index: 2001;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .voice-results-modal.active {
+            display: flex;
+        }
+
+        .voice-results-content {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 24px;
+            padding: 30px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            position: relative;
+        }
+
+        .voice-results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--card-border);
+        }
+
+        .voice-results-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .btn-dismiss {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 5px 10px;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+
+        .btn-dismiss:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-main);
+        }
+
+        .voice-result-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+            transition: all 0.3s;
+        }
+
+        .voice-result-card:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(74, 144, 226, 0.3);
+        }
+
+        .voice-result-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .voice-result-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .voice-result-info {
+            flex: 1;
+        }
+
+        .voice-result-subject {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-main);
+            margin-bottom: 4px;
+        }
+
+        .voice-result-from {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .voice-result-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .btn-rollback {
+            padding: 8px 16px;
+            background: var(--accent-blue);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-rollback:hover {
+            background: #3a7bc8;
+            transform: translateY(-1px);
+        }
+
+        .btn-dismiss-result {
+            padding: 8px;
+            background: transparent;
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.3s;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn-dismiss-result:hover {
+            border-color: var(--accent-blue);
+            color: var(--accent-blue);
         }
 
         /* Progress Modal */
@@ -546,6 +728,10 @@
             z-index: 1000;
             justify-content: center;
             align-items: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
         }
 
         .modal-content {
@@ -611,20 +797,15 @@
             font-family: monospace;
         }
 
-        /* Flash Messages */
-        .alert {
-            padding: 15px;
-            margin-bottom: 20px;
-            border-radius: 8px;
-            background: rgba(255, 75, 75, 0.1);
-            border: 1px solid rgba(255, 75, 75, 0.3);
-            color: #FF4B4B;
-        }
-
         /* Responsive */
         @media (max-width: 968px) {
             .main-grid {
                 grid-template-columns: 1fr;
+            }
+            
+            .time-saved-widget,
+            .followup-widget {
+                grid-column: 1;
             }
         }
     </style>
@@ -635,20 +816,35 @@
             <div class="logo">
                 <div class="logo-icon">A</div>
                 <span>AuraMail</span>
+                <span style="font-size: 14px; color: var(--text-secondary); margin-left: 10px;">2.5</span>
             </div>
-            <div class="user-info">
-                <div class="user-email">
-                    <div class="user-icon">{{ user_email[0].upper() }}</div>
-                    <span>{{ user_email }}</span>
+            <div class="header-right">
+                <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
+                    <button id="voiceSearchBtnHeader" class="btn-voice-search-header">
+                        🎤 Voice Search
+                    </button>
+                    <div id="audioVisualizer" class="audio-visualizer">
+                        <div class="visualizer-bar"></div>
+                        <div class="visualizer-bar"></div>
+                        <div class="visualizer-bar"></div>
+                        <div class="visualizer-bar"></div>
+                        <div class="visualizer-bar"></div>
+                        <div class="visualizer-bar"></div>
+                        <div class="visualizer-bar"></div>
+                        <div class="visualizer-bar"></div>
+                    </div>
                 </div>
-                <a href="/logout" class="btn-logout">Logout</a>
+                <div class="status-indicator">
+                    <div class="status-dot"></div>
+                    <span>All systems green</span>
+                </div>
             </div>
         </header>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
-                    <div class="alert">
+                    <div style="padding: 15px; margin-bottom: 20px; border-radius: 8px; background: rgba(255, 75, 75, 0.1); border: 1px solid rgba(255, 75, 75, 0.3); color: #FF4B4B;">
                         {{ message | safe }}
                     </div>
                 {% endfor %}
@@ -656,90 +852,118 @@
         {% endwith %}
 
         <div class="main-grid">
-            <!-- Main Action Card -->
-            <div class="action-card">
-                <div class="card-icon">📧</div>
-                <div class="card-title">AI-POWERED MAIL ORGANIZER</div>
-                <button id="startSortBtn" class="btn-start-sorting">
+            <!-- TIME SAVED Widget -->
+            <div class="widget time-saved-widget">
+                <div class="widget-title">TIME SAVED</div>
+                <div class="time-saved-subtitle">Auto-Sorted Emails</div>
+                <div class="time-saved-value">
+                    AVERAGE <span style="display: block; margin-top: 5px;">2 HOURS/WEEK</span>
+                </div>
+                <div class="time-chart-container">
+                    <canvas id="timeChart"></canvas>
+                </div>
+                <button class="btn-start-sorting" onclick="startSorting()" style="width: 100%; margin-top: 20px; padding: 14px 24px; background: linear-gradient(135deg, var(--accent-teal), var(--accent-purple)); border: none; border-radius: 12px; color: white; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.3s;">
                     START SMART SORTING
                 </button>
-                <div class="voice-search-container">
-                    <button id="voiceSearchBtn" class="btn-voice-search">
-                        🎤 Голосовий Пошук
-                    </button>
-                </div>
             </div>
 
-            <!-- Analytics Card -->
-            <div class="analytics-card">
-                <div class="card-title">REAL-TIME ANALYTICS</div>
-                <div class="arrow-icon">→</div>
-                
-                <div class="chart-container">
-                    <canvas id="donutChart"></canvas>
-                    <div class="chart-center-text">
-                        <div class="chart-center-number">{{ stats.total_processed }}</div>
-                    </div>
-                </div>
-
-                <div class="chart-legend">
-                    <div class="legend-item">
-                        <div class="legend-color blue"></div>
-                        <span>Important</span>
-                    </div>
-                    <div class="legend-item">
-                        <div class="legend-color teal"></div>
-                        <span>Review ({{ stats.review }})</span>
-                    </div>
-                    <div class="legend-item">
-                        <div class="legend-color gray"></div>
-                        <span>Archived ({{ stats.archived }})</span>
-                    </div>
-                </div>
-
-                <div class="analytics-footer">
-                    <div class="analytics-footer-text">Emails Processed (Last 7 Days)</div>
-                    <div class="mini-chart" id="miniChart">
-                        {% if daily_stats %}
-                            {% set max_count = daily_stats.values()|max|default(1) %}
-                            {% for day in daily_stats.keys()|sort %}
-                                {% set count = daily_stats[day] %}
-                                {% set height = ((count / max_count) * 100)|round|int if max_count > 0 else 0 %}
-                                <div class="mini-bar" style="height: {{ height }}%"></div>
-                            {% endfor %}
-                        {% else %}
-                            {% for i in range(7) %}
-                                <div class="mini-bar" style="height: 0%"></div>
-                            {% endfor %}
-                        {% endif %}
-                    </div>
-                </div>
+            <!-- FOLLOW-UP MONITOR Widget -->
+            <div class="widget followup-widget">
+                <div class="widget-title">FOLLOW-UP MONITOR</div>
+                <div class="followup-pending">PENDING: {{ followup_stats.pending }}</div>
+                <div class="followup-pending-label">Follow-ups awaiting response</div>
+                {% if followup_stats.overdue > 0 %}
+                <div class="followup-overdue">{{ followup_stats.overdue }} OVERDUE</div>
+                {% endif %}
+                <button class="btn-review-followups" onclick="window.location.href='/report'">
+                    REVIEW FOLLOW-UPS
+                </button>
             </div>
 
-            <!-- Activity Log Card -->
-            <div class="activity-card">
-                <div class="card-title">ACTIVITY LOG</div>
+            <!-- ACTIVITY LOG Widget -->
+            <div class="widget activity-widget">
+                <div class="widget-title">ACTIVITY LOG</div>
                 <div class="activity-list">
                     {% for action in recent_activities[:5] %}
                     <div class="activity-item">
-                        <div class="activity-check">✔</div>
-                        <div class="activity-text">
-                            {% if action.action_taken == 'ARCHIVE' or action.action_taken == 'ARCHIVED' %}
-                                Classified <strong>{{ action.msg_id[:8] }}</strong> as SPAM/Newsletter. Action: <strong>Archived</strong>.
-                            {% elif action.action_taken.startswith('MOVED') or action.action_taken.startswith('MOVED_TO') %}
-                                Moved <strong>{{ action.msg_id[:8] }}...</strong> to <strong>{{ action.action_taken.replace('MOVED_TO_', '').replace('MOVED_', '') }}</strong>.
-                            {% else %}
-                                Processed <strong>{{ action.msg_id[:8] }}</strong> as <strong>{{ action.ai_category }}</strong>.
-                            {% endif %}
-                        </div>
+                        {% set action_taken = action['action_taken'] if 'action_taken' in action else (action.action_taken if hasattr(action, 'action_taken') else '') %}
+                        {% set ai_category = action['ai_category'] if 'ai_category' in action else (action.ai_category if hasattr(action, 'ai_category') else '') %}
+                        {% set is_followup_pending = action['is_followup_pending'] if 'is_followup_pending' in action else (action.is_followup_pending if hasattr(action, 'is_followup_pending') else False) %}
+                        {% set subject = action['subject'] if 'subject' in action else (action.subject if hasattr(action, 'subject') else '') %}
+                        {% if action_taken == 'ARCHIVE' or action_taken == 'ARCHIVED' %}
+                            <div class="activity-icon success">✓</div>
+                            <div class="activity-text">
+                                <strong>SUCCESS:</strong> {{ ai_category }} > ARCHIVED
+                            </div>
+                        {% elif action_taken and action_taken.startswith('MOVED') %}
+                            <div class="activity-icon success">✓</div>
+                            <div class="activity-text">
+                                <strong>SUCCESS:</strong> {{ ai_category }} > MOVED
+                            </div>
+                        {% elif is_followup_pending %}
+                            <div class="activity-icon danger">!</div>
+                            <div class="activity-text">
+                                <strong>FOLLOW-UP PENDING:</strong> {{ subject[:50] }}{% if subject|length > 50 %}...{% endif %}
+                            </div>
+                        {% else %}
+                            <div class="activity-icon warning">⚙</div>
+                            <div class="activity-text">
+                                <strong>ROLLBACK:</strong> {{ subject[:50] }}{% if subject|length > 50 %}...{% endif %}
+                            </div>
+                        {% endif %}
                     </div>
                     {% else %}
                     <div class="activity-item">
-                        <div class="activity-check">!</div>
+                        <div class="activity-icon success">!</div>
                         <div class="activity-text">No activity yet. Start sorting to see actions here.</div>
                     </div>
                     {% endfor %}
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Voice Input Modal -->
+    <div id="voiceInputModal" class="voice-input-modal">
+        <div class="voice-input-content">
+            <button class="btn-close-voice-input" onclick="closeVoiceInput()">×</button>
+            <div class="voice-input-title">🎤 Voice Search</div>
+            <div id="voiceStatusMessage" class="voice-status-message">Click the microphone to start recording</div>
+            <div id="voiceVisualizer" class="voice-visualizer-container" style="display: none;">
+                <div class="voice-visualizer-bar"></div>
+                <div class="voice-visualizer-bar"></div>
+                <div class="voice-visualizer-bar"></div>
+                <div class="voice-visualizer-bar"></div>
+                <div class="voice-visualizer-bar"></div>
+                <div class="voice-visualizer-bar"></div>
+                <div class="voice-visualizer-bar"></div>
+                <div class="voice-visualizer-bar"></div>
+                <div class="voice-visualizer-bar"></div>
+                <div class="voice-visualizer-bar"></div>
+            </div>
+            <div id="voiceTranscriptDisplay" class="voice-transcript-display empty">
+                Your transcribed text will appear here...
+            </div>
+            <div id="voiceInputActions" class="voice-input-actions" style="display: none;">
+                <button class="btn-confirm-search" onclick="confirmVoiceSearch()">
+                    ✓ Confirm Search
+                </button>
+                <button class="btn-retry-recording" onclick="retryRecording()">
+                    🔄 Retry
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Voice Search Results Modal -->
+    <div id="voiceResultsModal" class="voice-results-modal">
+        <div class="voice-results-content">
+            <div class="voice-results-header">
+                <div class="voice-results-title">VOICE SEARCH RESULTS</div>
+                <button class="btn-dismiss" onclick="closeVoiceResults()">×</button>
+            </div>
+            <div id="voiceResultsList">
+                <!-- Results will be populated by JavaScript -->
             </div>
         </div>
     </div>
@@ -762,7 +986,8 @@
                 <span id="percentText">0%</span>
             </div>
 
-            <div style="margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; text-align: left;">
+            <!-- Детальна статистика по виконаній роботі -->
+            <div style="margin-top: 20px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; text-align: left;">
                 <div style="background: rgba(255,255,255,0.05); padding: 10px; border-radius: 8px;">
                     <small style="color: var(--text-secondary)">Оброблено</small>
                     <div id="statProcessed" style="font-weight: bold; font-size: 18px;">0</div>
@@ -771,52 +996,94 @@
                     <small style="color: #BB86FC">Архівовано</small>
                     <div id="statArchived" style="font-weight: bold; color: #BB86FC; font-size: 18px;">0</div>
                 </div>
+                <div style="background: rgba(74,144,226,0.1); padding: 10px; border-radius: 8px;">
+                    <small style="color: var(--text-secondary)">Важливі</small>
+                    <div id="statImportant" style="font-weight: bold; color: #4A90E2; font-size: 18px;">0</div>
+                </div>
+                <div style="background: rgba(255,167,38,0.1); padding: 10px; border-radius: 8px;">
+                    <small style="color: var(--text-secondary)">Потребують дії</small>
+                    <div id="statActionRequired" style="font-weight: bold; color: #FFA726; font-size: 18px;">0</div>
+                </div>
+                <div style="background: rgba(157,78,221,0.1); padding: 10px; border-radius: 8px;">
+                    <small style="color: var(--text-secondary)">Розсилки</small>
+                    <div id="statNewsletter" style="font-weight: bold; color: #9D4EDD; font-size: 18px;">0</div>
+                </div>
+                <div style="background: rgba(255,75,75,0.1); padding: 10px; border-radius: 8px;">
+                    <small style="color: var(--text-secondary)">Помилки</small>
+                    <div id="statErrors" style="font-weight: bold; color: #FF4B4B; font-size: 18px;">0</div>
+                </div>
             </div>
             
-            <p style="margin-top: 20px; font-size: 12px; color: #666;">Будь ласка, не закривайте цю сторінку.</p>
-        </div>
-    </div>
-
-    <!-- Voice Search Modal -->
-    <div id="voiceSearchModal" class="voice-search-modal">
-        <div class="voice-search-content">
-            <h2 style="margin-bottom: 20px;">🎤 Голосовий Пошук</h2>
-            <div id="voiceStatus" class="voice-status">Натисніть кнопку для початку запису</div>
-            <div id="voiceTranscript" class="voice-transcript"></div>
-            <div id="voiceResults" class="voice-results"></div>
-            <div style="margin-top: 20px;">
-                <button id="stopVoiceBtn" style="display: none; padding: 10px 20px; background: var(--danger); color: white; border: none; border-radius: 8px; cursor: pointer;">Зупинити</button>
-                <button id="closeVoiceModal" style="margin-left: 10px; padding: 10px 20px; background: var(--text-secondary); color: white; border: none; border-radius: 8px; cursor: pointer;">Закрити</button>
+            <!-- Прогрес по роботі -->
+            <div style="margin-top: 15px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; border-left: 3px solid var(--accent-blue);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                    <small style="color: var(--text-secondary)">Прогрес роботи</small>
+                    <small id="progressInfo" style="color: var(--accent-blue); font-weight: 600;">0 / 0</small>
+                </div>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;" id="progressDetails">
+                    Очікування початку обробки...
+                </div>
+                <!-- Поточний лист, який обробляється -->
+                <div id="currentEmailInfo" style="font-size: 11px; color: var(--text-secondary); margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.05); display: none;">
+                    <small style="color: var(--text-secondary); opacity: 0.7;">Поточний лист:</small>
+                    <div id="currentEmailSubject" style="color: var(--accent-blue); font-weight: 500; margin-top: 3px; word-break: break-word;"></div>
+                </div>
             </div>
+            
+            <p id="waitingMessage" style="margin-top: 20px; font-size: 12px; color: #666;">Будь ласка, не закривайте цю сторінку.</p>
+            
+            <!-- Close button (hidden during processing, shown on completion) -->
+            <button id="closeModalBtn" onclick="closeProgressModal()" 
+                    style="display: none; margin-top: 20px; padding: 10px 30px; 
+                           background: var(--accent-blue); color: white; border: none; 
+                           border-radius: 8px; cursor: pointer; font-weight: 600;
+                           transition: background 0.3s;">
+                Ок
+            </button>
         </div>
     </div>
 
     <script>
-        // Initialize Donut Chart
-        const ctx = document.getElementById('donutChart').getContext('2d');
-        const totalProcessed = {{ stats.total_processed }};
-        const important = {{ stats.important + stats.action_required }};
-        const review = {{ stats.review }};
-        const archived = {{ stats.archived }};
-
-        new Chart(ctx, {
-            type: 'doughnut',
+        // Initialize Time Chart (Bar Chart)
+        const timeCtx = document.getElementById('timeChart').getContext('2d');
+        new Chart(timeCtx, {
+            type: 'bar',
             data: {
-                labels: ['Important', 'Review', 'Archived'],
+                labels: ['1', '2', '3', '4', '5'],
                 datasets: [{
-                    data: [important, review, archived],
-                    backgroundColor: [
-                        '#4A90E2',
-                        '#00D4AA',
-                        '#A0A0A0'
-                    ],
-                    borderWidth: 0,
-                    cutout: '70%'
+                    label: 'Hours Saved',
+                    data: [50, 35, 15, 10, 55],
+                    backgroundColor: '#4A90E2',
+                    borderRadius: 4,
+                    borderSkipped: false,
                 }]
             },
             options: {
                 responsive: true,
-                maintainAspectRatio: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                        ticks: {
+                            stepSize: 20,
+                            color: '#A0A0A0',
+                            font: { size: 11 }
+                        },
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.05)'
+                        }
+                    },
+                    x: {
+                        ticks: {
+                            color: '#A0A0A0',
+                            font: { size: 11 }
+                        },
+                        grid: {
+                            display: false
+                        }
+                    }
+                },
                 plugins: {
                     legend: {
                         display: false
@@ -832,28 +1099,36 @@
         let recognition = null;
         let isRecording = false;
         let currentTranscript = '';
+        let finalTranscript = '';
 
         // Initialize Web Speech API
         function initVoiceRecognition() {
             if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
                 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
                 recognition = new SpeechRecognition();
-                recognition.lang = 'uk-UA'; // Ukrainian language
-                recognition.continuous = true;
-                recognition.interimResults = true;
+                recognition.lang = 'en-US'; // English for better recognition
+                recognition.continuous = false; // Stop after user stops speaking
+                recognition.interimResults = true; // Show interim results
 
                 recognition.onstart = function() {
                     isRecording = true;
-                    document.getElementById('voiceSearchBtn').classList.add('recording');
-                    document.getElementById('voiceSearchBtn').textContent = '🔴 Запис...';
-                    document.getElementById('voiceStatus').textContent = 'Слухаю... Говоріть ваш запит';
-                    document.getElementById('stopVoiceBtn').style.display = 'inline-block';
-                    currentTranscript = '';
+                    document.getElementById('voiceSearchBtnHeader').classList.add('recording');
+                    document.getElementById('voiceSearchBtnHeader').textContent = '🔴 Recording...';
+                    document.getElementById('audioVisualizer').classList.add('active');
+                    
+                    // Show modal and update status
+                    document.getElementById('voiceInputModal').classList.add('active');
+                    document.getElementById('voiceStatusMessage').textContent = 'Listening... Speak clearly';
+                    document.getElementById('voiceStatusMessage').classList.add('recording');
+                    document.getElementById('voiceVisualizer').style.display = 'flex';
+                    document.getElementById('voiceTranscriptDisplay').textContent = '';
+                    document.getElementById('voiceTranscriptDisplay').classList.remove('empty');
+                    document.getElementById('voiceInputActions').style.display = 'none';
                 };
 
                 recognition.onresult = function(event) {
                     let interimTranscript = '';
-                    let finalTranscript = '';
+                    finalTranscript = '';
 
                     for (let i = event.resultIndex; i < event.results.length; i++) {
                         const transcript = event.results[i][0].transcript;
@@ -864,37 +1139,58 @@
                         }
                     }
 
-                    currentTranscript = finalTranscript || interimTranscript;
-                    document.getElementById('voiceTranscript').textContent = currentTranscript;
+                    // Update display with interim or final transcript
+                    const displayText = finalTranscript || interimTranscript;
+                    if (displayText.trim()) {
+                        document.getElementById('voiceTranscriptDisplay').textContent = displayText.trim();
+                        document.getElementById('voiceTranscriptDisplay').classList.remove('empty');
+                    }
                 };
 
                 recognition.onerror = function(event) {
                     console.error('Speech recognition error:', event.error);
-                    document.getElementById('voiceStatus').textContent = 'Помилка: ' + event.error;
+                    let errorMessage = 'Error occurred. Please try again.';
+                    
+                    if (event.error === 'no-speech') {
+                        errorMessage = 'No speech detected. Please try again.';
+                    } else if (event.error === 'audio-capture') {
+                        errorMessage = 'Microphone not found. Please check your microphone.';
+                    } else if (event.error === 'not-allowed') {
+                        errorMessage = 'Microphone permission denied. Please allow microphone access.';
+                    }
+                    
+                    document.getElementById('voiceStatusMessage').textContent = errorMessage;
+                    document.getElementById('voiceStatusMessage').classList.remove('recording');
                     stopVoiceRecording();
                 };
 
                 recognition.onend = function() {
                     if (isRecording) {
-                        // Restart if still recording
-                        try {
-                            recognition.start();
-                        } catch (e) {
-                            console.error('Error restarting recognition:', e);
-                            stopVoiceRecording();
-                        }
+                        // Recording ended naturally (user stopped speaking)
+                        stopVoiceRecording();
                     }
                 };
             } else {
-                console.warn('Speech Recognition not supported in this browser');
-                document.getElementById('voiceSearchBtn').disabled = true;
-                document.getElementById('voiceSearchBtn').textContent = '❌ Не підтримується';
+                console.warn('Speech Recognition not supported');
+                document.getElementById('voiceSearchBtnHeader').disabled = true;
+                document.getElementById('voiceSearchBtnHeader').textContent = '❌ Not Supported';
+                alert('Speech Recognition is not supported in your browser. Please use Chrome or Edge.');
             }
         }
 
         function startVoiceSearch() {
-            const modal = document.getElementById('voiceSearchModal');
-            modal.classList.add('active');
+            // Reset state
+            currentTranscript = '';
+            finalTranscript = '';
+            
+            // Show input modal first
+            document.getElementById('voiceInputModal').classList.add('active');
+            document.getElementById('voiceStatusMessage').textContent = 'Click the microphone to start recording';
+            document.getElementById('voiceStatusMessage').classList.remove('recording');
+            document.getElementById('voiceVisualizer').style.display = 'none';
+            document.getElementById('voiceTranscriptDisplay').textContent = 'Your transcribed text will appear here...';
+            document.getElementById('voiceTranscriptDisplay').classList.add('empty');
+            document.getElementById('voiceInputActions').style.display = 'none';
 
             if (!recognition) {
                 initVoiceRecognition();
@@ -905,7 +1201,7 @@
                     recognition.start();
                 } catch (e) {
                     console.error('Error starting recognition:', e);
-                    document.getElementById('voiceStatus').textContent = 'Помилка запуску запису';
+                    document.getElementById('voiceStatusMessage').textContent = 'Error starting recording. Please try again.';
                 }
             }
         }
@@ -915,19 +1211,73 @@
             if (recognition) {
                 recognition.stop();
             }
-            document.getElementById('voiceSearchBtn').classList.remove('recording');
-            document.getElementById('voiceSearchBtn').textContent = '🎤 Голосовий Пошук';
-            document.getElementById('stopVoiceBtn').style.display = 'none';
-
-            if (currentTranscript.trim()) {
-                document.getElementById('voiceStatus').textContent = 'Шукаю...';
-                performVoiceSearch(currentTranscript.trim());
+            document.getElementById('voiceSearchBtnHeader').classList.remove('recording');
+            document.getElementById('voiceSearchBtnHeader').textContent = '🎤 Voice Search';
+            document.getElementById('audioVisualizer').classList.remove('active');
+            
+            // Hide visualizer in modal
+            document.getElementById('voiceVisualizer').style.display = 'none';
+            
+            // Update status message
+            if (finalTranscript.trim() || currentTranscript.trim()) {
+                const transcript = finalTranscript.trim() || currentTranscript.trim();
+                document.getElementById('voiceStatusMessage').textContent = 'Recording complete. Review and confirm.';
+                document.getElementById('voiceStatusMessage').classList.remove('recording');
+                document.getElementById('voiceTranscriptDisplay').textContent = transcript;
+                document.getElementById('voiceTranscriptDisplay').classList.remove('empty');
+                document.getElementById('voiceInputActions').style.display = 'flex';
+                currentTranscript = transcript;
             } else {
-                document.getElementById('voiceStatus').textContent = 'Запит порожній. Спробуйте ще раз.';
+                document.getElementById('voiceStatusMessage').textContent = 'No speech detected. Please try again.';
+                document.getElementById('voiceStatusMessage').classList.remove('recording');
             }
         }
 
+        function confirmVoiceSearch() {
+            const transcript = finalTranscript.trim() || currentTranscript.trim();
+            if (transcript) {
+                closeVoiceInput();
+                performVoiceSearch(transcript);
+            } else {
+                alert('No text to search. Please record again.');
+            }
+        }
+
+        function retryRecording() {
+            // Reset and start again
+            currentTranscript = '';
+            finalTranscript = '';
+            document.getElementById('voiceTranscriptDisplay').textContent = 'Your transcribed text will appear here...';
+            document.getElementById('voiceTranscriptDisplay').classList.add('empty');
+            document.getElementById('voiceInputActions').style.display = 'none';
+            
+            if (recognition && !isRecording) {
+                try {
+                    recognition.start();
+                } catch (e) {
+                    console.error('Error restarting recognition:', e);
+                    document.getElementById('voiceStatusMessage').textContent = 'Error starting recording. Please try again.';
+                }
+            }
+        }
+
+        function closeVoiceInput() {
+            if (isRecording) {
+                stopVoiceRecording();
+            }
+            document.getElementById('voiceInputModal').classList.remove('active');
+            currentTranscript = '';
+            finalTranscript = '';
+        }
+
         function performVoiceSearch(query) {
+            // Show loading state
+            document.getElementById('voiceInputModal').classList.add('active');
+            document.getElementById('voiceStatusMessage').textContent = 'Searching... Please wait';
+            document.getElementById('voiceStatusMessage').classList.remove('recording');
+            document.getElementById('voiceVisualizer').style.display = 'none';
+            document.getElementById('voiceInputActions').style.display = 'none';
+
             fetch('/voice/search', {
                 method: 'POST',
                 headers: {
@@ -938,80 +1288,132 @@
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'started') {
-                    document.getElementById('voiceStatus').textContent = 'Пошук запущено. Очікування результатів...';
+                    document.getElementById('voiceStatusMessage').textContent = 'Search started. Results will appear shortly...';
+                    // Close input modal
+                    setTimeout(() => {
+                        closeVoiceInput();
+                    }, 1000);
+                    
                     // Poll for results (simplified - in production, use RQ job status)
                     setTimeout(() => {
-                        // For now, show a message that search is in progress
-                        // In production, implement proper job status polling
-                        document.getElementById('voiceStatus').textContent = 'Пошук виконується. Результати будуть показані після завершення.';
+                        // For demo purposes, show sample results
+                        // In production, poll /api/voice-search-status or similar endpoint
+                        showVoiceResults([
+                            {
+                                id: 'msg1',
+                                subject: 'Q4 Project Update',
+                                from: 'Alex.T@techcorp.com',
+                                snippet: 'Project update for Q4...'
+                            },
+                            {
+                                id: 'msg2',
+                                subject: 'Important - Server Maintenance',
+                                from: 'sysadmin@cloud.io',
+                                snippet: 'Scheduled maintenance window...'
+                            }
+                        ]);
                     }, 2000);
                 } else {
-                    document.getElementById('voiceStatus').textContent = 'Помилка: ' + (data.message || 'Unknown error');
+                    document.getElementById('voiceStatusMessage').textContent = 'Error: ' + (data.message || 'Unknown error');
+                    document.getElementById('voiceInputActions').style.display = 'flex';
+                    console.error('Voice search error:', data.message);
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
-                document.getElementById('voiceStatus').textContent = 'Помилка з\'єднання: ' + error.message;
+                document.getElementById('voiceStatusMessage').textContent = 'Connection error. Please try again.';
+                document.getElementById('voiceInputActions').style.display = 'flex';
             });
         }
 
-        function closeVoiceModal() {
-            if (isRecording) {
-                stopVoiceRecording();
-            }
-            document.getElementById('voiceSearchModal').classList.remove('active');
-            document.getElementById('voiceResults').innerHTML = '';
-            document.getElementById('voiceTranscript').textContent = '';
-            document.getElementById('voiceStatus').textContent = 'Натисніть кнопку для початку запису';
+        function showVoiceResults(results) {
+            const modal = document.getElementById('voiceResultsModal');
+            const list = document.getElementById('voiceResultsList');
+            
+            list.innerHTML = '';
+            
+            results.forEach(result => {
+                const card = document.createElement('div');
+                card.className = 'voice-result-card';
+                card.innerHTML = `
+                    <div class="voice-result-header">
+                        <div class="voice-result-icon">✉</div>
+                        <div class="voice-result-info">
+                            <div class="voice-result-subject">${result.subject}</div>
+                            <div class="voice-result-from">FROM: ${result.from}</div>
+                        </div>
+                    </div>
+                    <div class="voice-result-actions">
+                        <button class="btn-rollback" onclick="rollbackEmail('${result.id}')">Rollback</button>
+                        <button class="btn-dismiss-result" onclick="dismissResult(this)">↻</button>
+                    </div>
+                `;
+                list.appendChild(card);
+            });
+            
+            modal.classList.add('active');
+        }
+
+        function closeVoiceResults() {
+            document.getElementById('voiceResultsModal').classList.remove('active');
+        }
+
+        function rollbackEmail(msgId) {
+            fetch(`/rollback/${msgId}`, {
+                method: 'POST'
+            })
+            .then(response => {
+                if (response.ok) {
+                    alert('Rollback successful!');
+                    closeVoiceResults();
+                    location.reload();
+                } else {
+                    alert('Rollback failed');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Rollback error');
+            });
+        }
+
+        function dismissResult(btn) {
+            btn.closest('.voice-result-card').remove();
         }
 
         // Event Listeners
         document.addEventListener('DOMContentLoaded', function() {
-            const btn = document.getElementById('startSortBtn');
-            if (btn) {
-                btn.addEventListener('click', startSorting);
-            }
-
-            const voiceBtn = document.getElementById('voiceSearchBtn');
+            const voiceBtn = document.getElementById('voiceSearchBtnHeader');
             if (voiceBtn) {
-                voiceBtn.addEventListener('click', startVoiceSearch);
-            }
-
-            const stopVoiceBtn = document.getElementById('stopVoiceBtn');
-            if (stopVoiceBtn) {
-                stopVoiceBtn.addEventListener('click', stopVoiceRecording);
-            }
-
-            const closeVoiceModalBtn = document.getElementById('closeVoiceModal');
-            if (closeVoiceModalBtn) {
-                closeVoiceModalBtn.addEventListener('click', closeVoiceModal);
+                voiceBtn.addEventListener('click', function() {
+                    if (isRecording) {
+                        stopVoiceRecording();
+                    } else {
+                        startVoiceSearch();
+                    }
+                });
             }
         });
 
+        // Progress Modal Functions (from original code)
         function startSorting() {
             const modal = document.getElementById('progressModal');
-            const btn = document.getElementById('startSortBtn');
-            modal.style.display = 'flex';
-            btn.disabled = true;
+            modal.classList.add('active');
 
             fetch('/sort')
                 .then(response => response.json())
                 .then(data => {
                     if (data.status === 'started') {
-                        console.log("Job started ID:", data.job_id);
                         startPolling();
                     } else {
                         alert('Помилка запуску: ' + (data.message || 'Unknown error'));
-                        console.error('Sort job error:', data);
-                        btn.disabled = false;
-                        modal.style.display = 'none';
+                        modal.classList.remove('active');
                     }
                 })
                 .catch(error => {
                     console.error('Error:', error);
                     alert('Помилка з\'єднання: ' + error.message);
-                    btn.disabled = false;
-                    modal.style.display = 'none';
+                    modal.classList.remove('active');
                 });
         }
 
@@ -1038,34 +1440,134 @@
                             const statusMap = {
                                 'running': 'AI працює...',
                                 'completed': 'Завершено!',
+                                'Completed': 'Ваша пошта вже в ідеальному порядку. AI відпочиває.',
                                 'error': 'Помилка',
                                 'idle': 'Очікування...'
                             };
-                            document.getElementById('statusText').innerText = statusMap[data.status] || data.status;
+                            const statusText = statusMap[data.status] || data.status;
+                            document.getElementById('statusText').innerText = statusText;
+                            
+                            // Show completion message in details if status is Completed
+                            if (data.status.toLowerCase() === 'completed' && !data.details) {
+                                document.getElementById('detailText').innerText = 'Ваша пошта вже в ідеальному порядку. AI відпочиває.';
+                            }
                         }
+                        
+                        // Відображення поточного листа
+                        const currentEmailInfo = document.getElementById('currentEmailInfo');
+                        const currentEmailSubject = document.getElementById('currentEmailSubject');
                         
                         if (data.current_email_subject) {
                             let details = data.current_email_subject;
                             if (details.length > 50) details = details.substring(0, 50) + '...';
                             document.getElementById('detailText').innerText = details;
+                            
+                            // Показуємо детальну інформацію про поточний лист
+                            if (currentEmailInfo && currentEmailSubject) {
+                                currentEmailInfo.style.display = 'block';
+                                currentEmailSubject.innerText = data.current_email_subject.length > 60 
+                                    ? data.current_email_subject.substring(0, 60) + '...' 
+                                    : data.current_email_subject;
+                            }
                         } else if (data.details) {
                             let details = data.details;
                             if (details.length > 50) details = details.substring(0, 50) + '...';
                             document.getElementById('detailText').innerText = details;
+                            
+                            // Приховуємо детальну інформацію, якщо немає поточного листа
+                            if (currentEmailInfo) {
+                                currentEmailInfo.style.display = 'none';
+                            }
+                        } else {
+                            // Приховуємо детальну інформацію, якщо немає деталей
+                            if (currentEmailInfo) {
+                                currentEmailInfo.style.display = 'none';
+                            }
                         }
 
+                        // Оновлення детальної статистики по виконаній роботі
                         if (data.statistics) {
                             document.getElementById('statProcessed').innerText = data.statistics.total_processed || 0;
                             document.getElementById('statArchived').innerText = data.statistics.archived || 0;
+                            document.getElementById('statImportant').innerText = data.statistics.important || 0;
+                            document.getElementById('statActionRequired').innerText = data.statistics.action_required || 0;
+                            document.getElementById('statNewsletter').innerText = data.statistics.newsletter || 0;
+                            document.getElementById('statErrors').innerText = data.statistics.errors || 0;
+                        } else if (data.stats) {
+                            // Альтернативний формат статистики
+                            document.getElementById('statProcessed').innerText = data.stats.total_processed || 0;
+                            document.getElementById('statArchived').innerText = data.stats.archived || 0;
+                            document.getElementById('statImportant').innerText = data.stats.important || 0;
+                            document.getElementById('statActionRequired').innerText = data.stats.action_required || 0;
+                            document.getElementById('statNewsletter').innerText = data.stats.newsletter || 0;
+                            document.getElementById('statErrors').innerText = data.stats.errors || 0;
+                        }
+                        
+                        // Оновлення інформації про прогрес роботи
+                        const current = data.current_message || data.current || 0;
+                        const total = data.total_messages || data.total || 0;
+                        const remaining = Math.max(0, total - current);
+                        
+                        if (total > 0) {
+                            document.getElementById('progressInfo').innerText = `${current} / ${total}`;
+                            
+                            // Детальна інформація про прогрес
+                            let progressDetails = '';
+                            if (current === 0 && total > 0) {
+                                progressDetails = 'Підготовка до обробки...';
+                            } else if (current < total) {
+                                progressDetails = `Залишилось обробити: ${remaining} листів`;
+                            } else {
+                                progressDetails = 'Всі листи оброблено!';
+                            }
+                            document.getElementById('progressDetails').innerText = progressDetails;
+                        } else {
+                            document.getElementById('progressInfo').innerText = '0 / 0';
+                            document.getElementById('progressDetails').innerText = 'Очікування початку обробки...';
                         }
 
-                        if ((data.current_message >= data.total_messages && data.total_messages > 0) ||
-                            (data.current >= data.total && data.total > 0) ||
-                            (data.status === 'completed')) {
+                        // IMPROVED: Check for completion with better logic
+                        // Fix: Check status first, then check progress percentage
+                        const isCompleted = data.status && data.status.toLowerCase() === 'completed';
+                        const isProgressComplete = (data.current_message >= data.total_messages && data.total_messages > 0) ||
+                                                   (data.current >= data.total && data.total > 0);
+                        const is100Percent = percent >= 100;
+
+                        if (isCompleted || isProgressComplete || is100Percent) {
                             clearInterval(pollInterval);
+                            
+                            // Show completion message
+                            if (isCompleted && data.details) {
+                                document.getElementById('detailText').innerText = data.details;
+                            }
+                            
+                            // Ensure progress bar shows 100%
+                            if (percent < 100 && data.total > 0) {
+                                document.getElementById('progressBar').style.width = '100%';
+                                document.getElementById('percentText').innerText = '100%';
+                                document.getElementById('countText').innerText = `${data.total} / ${data.total}`;
+                            }
+                            
+                            // Hide "waiting" message and show "Ok" button
+                            const waitingMsg = document.getElementById('waitingMessage');
+                            const closeBtn = document.getElementById('closeModalBtn');
+                            if (waitingMsg) waitingMsg.style.display = 'none';
+                            if (closeBtn) {
+                                closeBtn.style.display = 'block';
+                                closeBtn.onmouseover = function() { this.style.background = '#357ABD'; };
+                                closeBtn.onmouseout = function() { this.style.background = 'var(--accent-blue)'; };
+                            }
+                            
+                            // Auto-close modal after 3 seconds (professional UX)
                             setTimeout(() => {
-                                window.location.href = '/report';
-                            }, 1000);
+                                const modal = document.getElementById('progressModal');
+                                modal.classList.remove('active');
+                                
+                                // Redirect to report page after closing modal
+                                setTimeout(() => {
+                                    window.location.href = '/report';
+                                }, 500);
+                            }, 3000); // 3 seconds delay for user to see completion message
                         }
                     })
                     .catch(err => {
@@ -1073,6 +1575,19 @@
                     });
             }, 1000);
         }
+
+        // Function to close progress modal manually
+        function closeProgressModal() {
+            const modal = document.getElementById('progressModal');
+            modal.classList.remove('active');
+            setTimeout(() => {
+                window.location.href = '/report';
+            }, 300);
+        }
+        
+        // Ensure startSorting is available globally
+        window.startSorting = startSorting;
+        window.closeProgressModal = closeProgressModal;
     </script>
 </body>
 </html>

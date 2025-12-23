@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="uk">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AuraMail Звіт</title>
+    <title>AuraMail Report</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -186,16 +186,16 @@
     <div class="container">
         <div class="header-top">
             <a href="/" class="btn-primary-ai">
-                ⚡ Запустити AuraMail Сортування
+                ⚡ Start AuraMail Sorting
             </a>
             <div class="status-info">
                 <div class="status-item">
                     <span class="status-dot dot-green"></span>
-                    AI Статус: Активний
+                    AI Status: Active
                 </div>
                 <div class="status-item">
                     <span class="status-dot dot-yellow"></span>
-                    Конфігурація: {% if is_prod_secure %}Production Ready{% else %}Тестування (Env Vars){% endif %}
+                    Configuration: {% if is_prod_secure %}Production Ready{% else %}Testing (Env Vars){% endif %}
                 </div>
             </div>
         </div>
@@ -204,50 +204,50 @@
 
         <div class="completion-message">
             <span class="checkmark-icon">✔</span>
-            <span class="completion-text">Операція сортування завершена!</span>
+            <span class="completion-text">Sorting operation completed!</span>
         </div>
 
         <hr>
 
-        <div class="report-title">Аналітичний Звіт AuraMail</div>
+        <div class="report-title">AuraMail Analytics Report</div>
         <div class="processed-summary">
-            Всього листів опрацьовано: {{ stats.total_processed|default(0) }} (з INBOX, SPAM та TRASH)
+            Total emails processed: {{ stats.total_processed|default(0) }} (from INBOX, SPAM, and TRASH)
         </div>
 
-        <div class="results-heading">Результати:</div>
+        <div class="results-heading">Results:</div>
         <div class="results-list">
             <div class="result-item">
-                <span class="result-item-label">Важливі (AI_IMPORTANT):</span>
-                <span class="result-item-value">{{ stats.important|default(0) }} листів.</span>
+                <span class="result-item-label">Important (AI_IMPORTANT):</span>
+                <span class="result-item-value">{{ stats.important|default(0) }} emails.</span>
             </div>
             <div class="result-item">
-                <span class="result-item-label">Потребують дії (AI_ACTION):</span>
-                <span class="result-item-value">{{ stats.action_required|default(0) }} листів.</span>
+                <span class="result-item-label">Action Required (AI_ACTION):</span>
+                <span class="result-item-value">{{ stats.action_required|default(0) }} emails.</span>
             </div>
             <div class="result-item">
-                <span class="result-item-label">Розсилки (AI_NEWSLETTER):</span>
-                <span class="result-item-value">{{ stats.newsletter|default(0) }} листів.</span>
+                <span class="result-item-label">Newsletters (AI_NEWSLETTER):</span>
+                <span class="result-item-value">{{ stats.newsletter|default(0) }} emails.</span>
             </div>
             <div class="result-item">
-                <span class="result-item-label">Соцмережі (AI_SOCIAL):</span>
-                <span class="result-item-value">{{ stats.social|default(0) }} листів.</span>
+                <span class="result-item-label">Social Media (AI_SOCIAL):</span>
+                <span class="result-item-value">{{ stats.social|default(0) }} emails.</span>
             </div>
             <div class="result-item">
-                <span class="result-item-label">Для перегляду (AI_REVIEW):</span>
-                <span class="result-item-value">{{ stats.review|default(0) }} листів.</span>
+                <span class="result-item-label">For Review (AI_REVIEW):</span>
+                <span class="result-item-value">{{ stats.review|default(0) }} emails.</span>
             </div>
             <div class="result-item">
-                <span class="result-item-label">Архівовано (прибрано з INBOX):</span>
-                <span class="result-item-value">{{ stats.archived|default(0) }} листів (залишаються доступними у All Mail).</span>
+                <span class="result-item-label">Archived (removed from INBOX):</span>
+                <span class="result-item-value">{{ stats.archived|default(0) }} emails (still accessible in All Mail).</span>
             </div>
             <div class="result-item">
-                <span class="result-item-label">Помилки класифікації/дії:</span>
-                <span class="result-item-value">{{ stats.errors|default(0) }} (залишено на місці).</span>
+                <span class="result-item-label">Classification/Action errors:</span>
+                <span class="result-item-value">{{ stats.errors|default(0) }} (left in place).</span>
             </div>
         </div>
 
         <div class="final-message">
-            Ваша пошта значно чистіша! 🥳
+            Your inbox is significantly cleaner! 🥳
         </div>
     </div>
 </body>

@@ -5,10 +5,17 @@ This module can be imported by both server.py and worker.py.
 """
 import os
 import sys
+import warnings
 from flask import Flask
 from flask_caching import Cache
 from flask_cors import CORS
 from flask_talisman import Talisman
+
+# Suppress oauth2client/file_cache warnings (non-critical, comes from Google libraries)
+# These warnings occur because google-api-python-client internally checks for oauth2client
+# but we use modern google-auth-oauthlib instead
+warnings.filterwarnings('ignore', message='.*file_cache is only supported with oauth2client.*')
+warnings.filterwarnings('ignore', message='.*oauth2client.*')
 
 # Fix encoding for Windows console
 if sys.platform == 'win32':
@@ -27,7 +34,8 @@ from config import (
     ALLOW_ALL_CORS,
     FORCE_HTTPS,
     CACHE_REDIS_URL,
-    CACHE_DEFAULT_TIMEOUT
+    CACHE_DEFAULT_TIMEOUT,
+    BASE_URI
 )
 
 # Import database initialization
@@ -57,14 +65,16 @@ def create_app():
     # Cookie configuration
     # CRITICAL: For development with self-signed cert, we MUST disable Secure flag
     # Otherwise browsers will reject cookies even on HTTPS
-    if DEBUG:
-        # Development: Allow cookies on localhost with self-signed cert
+    # Also check BASE_URI to determine if we're using HTTPS
+    base_uri_https = BASE_URI.startswith('https://')
+    if DEBUG or not base_uri_https:
+        # Development or HTTP: Allow cookies without Secure flag
         app.config['SESSION_COOKIE_SECURE'] = False
         app.config['SESSION_COOKIE_HTTPONLY'] = True
         app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # Allow cookies on redirect from OAuth
         app.config['SESSION_COOKIE_DOMAIN'] = None  # Allow cookies on localhost
     else:
-        # Production: Use secure cookies on real HTTPS
+        # Production HTTPS: Use secure cookies
         app.config['SESSION_COOKIE_SECURE'] = FORCE_HTTPS
         app.config['SESSION_COOKIE_HTTPONLY'] = True
         app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'

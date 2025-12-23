@@ -12,43 +12,30 @@ def build_google_services(creds):
     """
     Creates Gmail and Calendar service objects.
     
+    FIX: Disables discovery cache to prevent "file_cache is only supported with oauth2client<4.0.0" warnings.
+    This eliminates unnecessary file I/O and speeds up service creation.
+    
     Args:
         creds: Credentials object with OAuth tokens
     
     Returns:
         Tuple (gmail_service, calendar_service)
     """
-    # 1. Create Gmail service
-    gmail_service = build('gmail', 'v1', credentials=creds)
+    # CRITICAL FIX: Disable discovery cache to prevent file_cache warnings
+    # This eliminates the "file_cache is only supported with oauth2client<4.0.0" error
+    # and speeds up service creation by avoiding unnecessary file I/O
+    cache_discovery = False  # Disable file-based discovery cache
     
-    # 2. Create Calendar service
-    calendar_service = build('calendar', 'v3', credentials=creds)
+    # 1. Create Gmail service with cache_discovery=False
+    gmail_service = build('gmail', 'v1', credentials=creds, cache_discovery=cache_discovery)
+    
+    # 2. Create Calendar service with cache_discovery=False
+    calendar_service = build('calendar', 'v3', credentials=creds, cache_discovery=cache_discovery)
     
     return gmail_service, calendar_service
 
 
-def get_user_email_info(credentials_json):
-    """Returns ID of 10 latest user emails."""
-    try:
-        # Restore Credentials object from JSON saved in session
-        creds = Credentials.from_authorized_user_info(json.loads(credentials_json), SCOPES)
-        
-        # Create Gmail API service object
-        service = build('gmail', 'v1', credentials=creds)
-        
-        # Call API to get message list
-        results = service.users().messages().list(userId='me', maxResults=10).execute()
-        messages = results.get('messages', [])
-        
-        if not messages:
-            return "Не знайдено жодного листа."
-        
-        # Return IDs of found emails
-        message_ids = [msg['id'] for msg in messages]
-        return f"З'єднання успішне! Знайдено листів: {len(message_ids)}. ID першого листа: {message_ids[0]}"
-        
-    except Exception as e:
-        return f"Помилка при виклику API: {e}"
+
 
 
 def get_message_content(service, msg_id):
@@ -84,8 +71,36 @@ def get_message_content(service, msg_id):
             sender = str(sender).encode('ascii', errors='replace').decode('ascii')
             date = str(date).encode('ascii', errors='replace').decode('ascii')
         
-        # For simplicity, return subject and beginning of email (snippet)
-        content_text = f"Subject: {subject}\nFrom: {sender}\nDate: {date}\nSnippet: {snippet}"
+        # Отримуємо повний текст листа для кращої точності класифікації
+        full_body = ""
+        try:
+            # Рекурсивно обходимо всі частини листа
+            def extract_body(part):
+                body = ""
+                if part.get('body', {}).get('data'):
+                    import base64
+                    body = base64.urlsafe_b64decode(part['body']['data']).decode('utf-8', errors='replace')
+                elif part.get('body', {}).get('attachmentId'):
+                    # Пропускаємо вкладення для швидкості
+                    pass
+                
+                # Рекурсивно обробляємо вкладені частини
+                for subpart in part.get('parts', []):
+                    body += extract_body(subpart)
+                
+                return body
+            
+            full_body = extract_body(payload)
+            # Якщо повний текст отримано, використовуємо його, инакше snippet
+            if full_body and len(full_body) > len(snippet):
+                content_text = f"Subject: {subject}\nFrom: {sender}\nDate: {date}\n\n{full_body}"
+            else:
+                content_text = f"Subject: {subject}\nFrom: {sender}\nDate: {date}\nSnippet: {snippet}"
+        except Exception as body_error:
+            # Якщо не вдалося отримати повний текст, використовуємо snippet
+            print(f"⚠️ Не вдалося отримати повний текст листа {msg_id}: {body_error}, використовуємо snippet")
+            content_text = f"Subject: {subject}\nFrom: {sender}\nDate: {date}\nSnippet: {snippet}"
+        
         return content_text, subject
         
     except Exception as e:
@@ -214,12 +229,16 @@ def process_message_action(service, msg_id, classification_data, label_cache):
             if not label_name:
                 raise ValueError("label_name обов'язковий для дії MOVE")
             
+            # Додаємо мітку "AuraMail_Sorted" для захисту від дублювання
+            processed_label_name = "AuraMail_Sorted"
+            processed_label_id = get_or_create_label_id(service, processed_label_name, label_cache, category="DEFAULT")
+            
             # Pass category from classification_data for better color mapping
             category = classification_data.get('category')
             label_id = get_or_create_label_id(service, label_name, label_cache, category=category)
             
             modification = {
-                'addLabelIds': [label_id],
+                'addLabelIds': [label_id, processed_label_id],  # Додаємо обидві мітки
                 'removeLabelIds': ['INBOX']
             }
             service.users().messages().modify(userId='me', id=msg_id, body=modification).execute()
@@ -369,7 +388,7 @@ def rollback_action(gmail_service, log_entry: dict, label_cache: dict) -> str:
     Returns:
         String with rollback execution status
     """
-    msg_id = log_entry.get('message_id')
+    msg_id = log_entry.get('message_id') or log_entry.get('msg_id')
     original_action = log_entry.get('action_taken')
     original_label = log_entry.get('label_name', '')
     
@@ -377,7 +396,7 @@ def rollback_action(gmail_service, log_entry: dict, label_cache: dict) -> str:
         return "ERROR: Message ID not found in log entry."
     
     # Legacy DELETE action support: treat as ARCHIVE for rollback
-    if original_action == 'DELETE':
+    if original_action in ('DELETE', 'DELETED'):
         original_action = 'ARCHIVE'
     
     modification = {}

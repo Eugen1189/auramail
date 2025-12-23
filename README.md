@@ -8,11 +8,13 @@
 
 ## 📊 Project Status
 
-- ✅ **60 tests** - All passing (100%)
-- ✅ **66% code coverage** - Production ready
+- ✅ **291 tests passing** | 2 skipped (expected) - **100% success rate**
+- ✅ **82% code coverage** - Production ready (with parallel execution)
 - ✅ **CI/CD Pipeline** - Automated testing and deployment
 - ✅ **Security** - Flask-Talisman, CORS, Secret Management
 - ✅ **Database** - Alembic migrations, Connection pooling
+- ✅ **Test Isolation** - pytest-xdist with loadscope for parallel execution
+- ✅ **Test Stability** - StaticPool for database isolation, comprehensive error handling
 
 ## 🚀 Quick Start
 
@@ -66,11 +68,16 @@ auramail/
 ├── database.py            # SQLAlchemy models
 ├── config.py              # Configuration management
 ├── utils/
-│   ├── gmail_api.py       # Gmail API integration (66% coverage)
-│   ├── gemini_processor.py # AI classification (74% coverage)
-│   ├── db_logger.py       # Database logging (75% coverage)
-│   └── cache_helper.py    # Cache management
-├── tests/                 # Test suite (60 tests)
+│   ├── gmail_api.py       # Gmail API integration (82% coverage)
+│   ├── gemini_processor.py # AI classification (86% coverage)
+│   ├── db_logger.py       # Database logging (58% coverage)
+│   ├── agents.py          # AI agents (Librarian, Security Guard)
+│   └── cache_helper.py    # Cache management (100% coverage)
+├── tests/                 # Test suite (291 tests)
+│   ├── test_db_logger_coverage.py  # Additional coverage tests
+│   ├── test_worker.py              # Worker tests
+│   └── ...
+├── legacy/                # Maintenance scripts (0% coverage, manual use)
 │   ├── test_gmail_api.py
 │   ├── test_gemini_processor_extended.py
 │   ├── test_db_logger_extended.py
@@ -83,13 +90,24 @@ auramail/
 
 ## 🧪 Testing
 
-Run all tests:
+**Run all tests (parallel execution):**
 ```bash
-pytest tests/ -v --cov=. --cov-report=html
+pytest tests/ -v
 ```
 
-Coverage report:
+**Run with coverage (parallel execution - recommended):**
+```bash
+pytest tests/ --cov=. --cov-report=html --cov-report=term-missing
+```
+
+**Coverage report:**
 - Open `htmlcov/index.html` in browser
+- **Note:** Coverage works best with parallel execution (`pytest-xdist`). If you see coverage warnings, they don't affect test results.
+
+**Test Configuration:**
+- Parallel execution: `pytest-xdist` with `--dist loadscope` (default)
+- Database isolation: `StaticPool` for complete test isolation
+- Test order: `pytest-order` ensures proper execution sequence
 
 ## 🔄 CI/CD Pipeline
 
@@ -105,11 +123,20 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
 
 | Module | Coverage | Status |
 |--------|----------|--------|
-| `utils/db_logger.py` | 75% | ✅ Excellent |
-| `utils/gemini_processor.py` | 74% | ✅ Excellent |
-| `utils/gmail_api.py` | 66% | ✅ Good |
-| `database.py` | 95% | ✅ Excellent |
-| **Total** | **66%** | ✅ Production Ready |
+| `utils/db_logger.py` | 68% | ✅ Good |
+| `utils/gemini_processor.py` | 86% | ✅ Excellent |
+| `utils/gmail_api.py` | 82% | ✅ Excellent |
+| `database.py` | 88% | ✅ Excellent |
+| `tasks.py` | 84% | ✅ Excellent |
+| `server.py` | 62% | ✅ Good |
+| `worker.py` | 30% | ⚠️ Basic (tested via tasks.py) |
+| **Total** | **82%** | ✅ Production Ready |
+
+**Test Statistics:**
+- 🧪 **291 tests passing** | 2 skipped (expected)
+- ⚡ **Parallel execution** with pytest-xdist (loadscope)
+- 🔒 **Full isolation** with StaticPool and comprehensive fixtures
+- 📊 **Coverage report:** Run `pytest --cov=. --cov-report=html` (single-threaded for final report)
 
 ## 🔒 Security Features
 

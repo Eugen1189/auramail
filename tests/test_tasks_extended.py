@@ -144,13 +144,185 @@ class TestBackgroundSortTaskExtended:
         with app.app_context():
             result = _background_sort_task_impl(credentials_json)
         
-        # Should still initialize with 0
-        mock_init.assert_called_once_with(total=0)
+        # CRITICAL FIX: Empty inbox now initializes with total=1 (not 0) to show 100% completion
+        # This ensures UI shows correct progress (1/1 = 100%) instead of 0/0
+        mock_init.assert_called_once_with(total=1)
         mock_complete.assert_called_once()
         mock_save_report.assert_called_once()
         
         assert result is not None
         assert result['total_processed'] == 0
+        assert result['status'] == 'empty_inbox'
+    
+    @patch('tasks.save_report')
+    @patch('tasks.complete_progress')
+    @patch('tasks.init_progress')
+    @patch('tasks.get_gemini_client')
+    @patch('tasks.build_google_services')
+    @patch('utils.agents.LibrarianAgent')
+    def test_background_sort_task_early_exit_no_gemini_calls(self, mock_librarian, mock_build_services, 
+                                                             mock_gemini, mock_init, mock_complete, 
+                                                             mock_save_report, app):
+        """
+        Test that background_sort_task makes ZERO Gemini calls when all emails are already processed.
+        
+        This test verifies the Early Exit optimization:
+        - LibrarianAgent filters out all emails (by labels or DB)
+        - No Gemini API calls are made
+        - Task completes immediately with gemini_calls=0
+        """
+        from tasks import _background_sort_task_impl
+        from database import ActionLog
+        
+        mock_service = MagicMock()
+        mock_build_services.return_value = (mock_service, MagicMock())
+        mock_gemini_client = MagicMock()
+        mock_gemini.return_value = mock_gemini_client
+        
+        # Mock messages list - return some messages
+        test_messages = [
+            {'id': 'msg1'},
+            {'id': 'msg2'},
+            {'id': 'msg3'}
+        ]
+        
+        mock_messages_list = MagicMock()
+        mock_messages_list.execute.return_value = {'messages': test_messages}
+        mock_messages = MagicMock()
+        mock_messages.list.return_value = mock_messages_list
+        mock_users = MagicMock()
+        mock_users.messages = MagicMock(return_value=mock_messages)
+        mock_service.users.return_value = mock_users
+        
+        # Mock labels
+        mock_labels_list = MagicMock()
+        mock_labels_list.execute.return_value = {'labels': []}
+        mock_labels = MagicMock()
+        mock_labels.list.return_value = mock_labels_list
+        mock_users.labels = MagicMock(return_value=mock_labels)
+        
+        # Mock LibrarianAgent to return all emails as already processed
+        # This simulates the Early Exit scenario
+        mock_librarian_instance = MagicMock()
+        mock_librarian.check_gmail_labels_for_processed.return_value = (
+            ['msg1', 'msg2', 'msg3'],  # unprocessed_by_labels (will be checked in DB)
+            []  # processed_by_labels
+        )
+        mock_librarian.filter_already_processed.return_value = (
+            [],  # new_msg_ids (EMPTY - all processed!)
+            ['msg1', 'msg2', 'msg3']  # processed_in_db
+        )
+        
+        credentials_json = json.dumps({
+            'token': 'test_token',
+            'refresh_token': 'test_refresh',
+            'token_uri': 'https://oauth2.googleapis.com/token',
+            'client_id': 'test_client',
+            'client_secret': 'test_secret',
+            'scopes': ['https://www.googleapis.com/auth/gmail.modify']
+        })
+        
+        with app.app_context():
+            result = _background_sort_task_impl(credentials_json)
+        
+        # CRITICAL ASSERTIONS: Verify Early Exit behavior
+        assert result is not None
+        assert result['status'] == 'skipped_all'
+        assert result['gemini_calls'] == 0  # NO GEMINI CALLS!
+        assert result['total_skipped'] == 3  # All 3 emails skipped
+        assert result['processed_by_labels'] == 0
+        assert result['processed_in_db'] == 3
+        
+        # Verify Gemini client was NEVER used (no calls to generate_content)
+        assert not mock_gemini_client.models.generate_content.called, \
+            "Gemini should NOT be called when all emails are already processed!"
+        
+        # Verify progress was updated correctly
+        mock_init.assert_called_once()
+        mock_complete.assert_called_once()
+        
+        # Verify LibrarianAgent was called correctly
+        mock_librarian.check_gmail_labels_for_processed.assert_called_once()
+        mock_librarian.filter_already_processed.assert_called_once()
+    
+    @patch('tasks.save_report')
+    @patch('tasks.complete_progress')
+    @patch('tasks.init_progress')
+    @patch('tasks.get_gemini_client')
+    @patch('tasks.build_google_services')
+    @patch('utils.agents.LibrarianAgent')
+    def test_background_sort_task_early_exit_by_labels(self, mock_librarian, mock_build_services,
+                                                       mock_gemini, mock_init, mock_complete,
+                                                       mock_save_report, app):
+        """
+        Test Early Exit when emails are filtered by Gmail labels (before DB check).
+        
+        This verifies that LibrarianAgent can skip emails using Gmail labels,
+        which is faster than DB queries.
+        """
+        from tasks import _background_sort_task_impl
+        
+        mock_service = MagicMock()
+        mock_build_services.return_value = (mock_service, MagicMock())
+        mock_gemini_client = MagicMock()
+        mock_gemini.return_value = mock_gemini_client
+        
+        # Mock messages list
+        test_messages = [
+            {'id': 'msg1'},
+            {'id': 'msg2'}
+        ]
+        
+        mock_messages_list = MagicMock()
+        mock_messages_list.execute.return_value = {'messages': test_messages}
+        mock_messages = MagicMock()
+        mock_messages.list.return_value = mock_messages_list
+        mock_users = MagicMock()
+        mock_users.messages = MagicMock(return_value=mock_messages)
+        mock_service.users.return_value = mock_users
+        
+        # Mock labels
+        mock_labels_list = MagicMock()
+        mock_labels_list.execute.return_value = {'labels': []}
+        mock_labels = MagicMock()
+        mock_labels.list.return_value = mock_labels_list
+        mock_users.labels = MagicMock(return_value=mock_labels)
+        
+        # Mock LibrarianAgent: All emails filtered by labels (Processed label)
+        mock_librarian.check_gmail_labels_for_processed.return_value = (
+            [],  # unprocessed_by_labels (EMPTY - all have Processed label)
+            ['msg1', 'msg2']  # processed_by_labels
+        )
+        # filter_already_processed should NOT be called since all are filtered by labels
+        mock_librarian.filter_already_processed.return_value = ([], [])
+        
+        credentials_json = json.dumps({
+            'token': 'test_token',
+            'refresh_token': 'test_refresh',
+            'token_uri': 'https://oauth2.googleapis.com/token',
+            'client_id': 'test_client',
+            'client_secret': 'test_secret',
+            'scopes': ['https://www.googleapis.com/auth/gmail.modify']
+        })
+        
+        with app.app_context():
+            result = _background_sort_task_impl(credentials_json)
+        
+        # Verify Early Exit
+        assert result is not None
+        assert result['status'] == 'skipped_all'
+        assert result['gemini_calls'] == 0
+        assert result['total_skipped'] == 2
+        assert result['processed_by_labels'] == 2
+        assert result['processed_in_db'] == 0
+        
+        # Verify NO Gemini calls
+        assert not mock_gemini_client.models.generate_content.called
+        
+        # Verify LibrarianAgent was called
+        mock_librarian.check_gmail_labels_for_processed.assert_called_once()
+        # filter_already_processed should be called with empty list (all filtered by labels)
+        mock_librarian.filter_already_processed.assert_called_once_with([])
     
     @patch('tasks.save_report')
     @patch('tasks.complete_progress')
@@ -622,11 +794,19 @@ class TestProcessSingleEmailTaskExtended:
     @patch('tasks.process_message_action')
     @patch('tasks.log_action')
     @patch('tasks.integrate_with_calendar')
-    def test_process_single_email_task_with_archived_action(self, mock_calendar, mock_log,
+    @patch('utils.agents.SecurityGuardAgent')
+    def test_process_single_email_task_with_archived_action(self, mock_security_guard, mock_calendar, mock_log,
                                                              mock_process_action, mock_classify,
                                                              mock_get_content, mock_build_services, app):
         """Test process_single_email_task with ARCHIVED action."""
         from tasks import _process_single_email_task_impl
+        
+        # Mock Security Guard to return safe result
+        mock_security_guard.analyze_security.return_value = {
+            'is_safe': True,
+            'threat_level': 'LOW',
+            'suspicious_score': 0
+        }
         
         mock_service = MagicMock()
         mock_build_services.return_value = (mock_service, MagicMock())

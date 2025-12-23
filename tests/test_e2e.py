@@ -10,6 +10,10 @@ import time
 import json
 from unittest.mock import patch, Mock
 
+# CRITICAL FIX: Стратегія "Розділяй і володарюй"
+# Маркування E2E тестів для правильного порядку виконання
+pytestmark = pytest.mark.order(-1)  # E2E тести виконуються останніми
+
 
 @pytest.mark.e2e
 @pytest.mark.skipif(True, reason="E2E tests require running server - run manually")
@@ -120,39 +124,74 @@ class TestE2EFlow:
 class TestIntegrationFlow:
     """Integration tests that test multiple components together."""
     
-    @pytest.fixture
-    def client(self):
-        """Create test client."""
-        from server import app
-        app.config['TESTING'] = True
-        app.config['SECRET_KEY'] = 'test-secret-key'
-        with app.test_client() as client:
-            with app.app_context():
-                yield client
+    # CRITICAL FIX: Remove local client fixture - use logged_in_client from conftest.py instead
+    # This prevents conflicts and ensures proper session handling
     
+    @patch('server.Redis')
     @patch('server.build_google_services')
     @patch('server.get_action_history')
     @patch('server.calculate_stats')
     @patch('server.get_daily_stats')
+    @patch('server.get_followup_stats')
     @patch('server.get_user_credentials')
     def test_dashboard_data_integration(
-        self, mock_get_credentials, mock_daily_stats, mock_calculate_stats,
-        mock_action_history, mock_build_services, client
+        self, mock_get_credentials, mock_followup_stats, mock_daily_stats, mock_calculate_stats,
+        mock_action_history, mock_build_services, mock_redis_class, logged_in_client
     ):
         """Test that dashboard integrates all data sources correctly."""
         from google.oauth2.credentials import Credentials
+        import json
+        from datetime import datetime, timedelta
         
         # Setup mocks
         mock_creds = Mock(spec=Credentials)
         mock_get_credentials.return_value = mock_creds
         
+        # CRITICAL FIX: Встановлюємо credentials у session перед запитом
+        # Це гарантує, що credentials є в session навіть коли виникають помилки
+        mock_credentials = {
+            'token': 'mock_access_token',
+            'refresh_token': 'mock_refresh_token',
+            'token_uri': 'https://oauth2.googleapis.com/token',
+            'client_id': 'mock_client_id',
+            'client_secret': 'mock_client_secret',
+            'scopes': ['https://www.googleapis.com/auth/gmail.modify'],
+            'expiry': (datetime.utcnow() + timedelta(hours=1)).isoformat()
+        }
+        
+        # CRITICAL FIX: Встановлюємо credentials у session перед запитом
+        with logged_in_client.session_transaction() as sess:
+            sess['credentials'] = json.dumps(mock_credentials)
+            sess.permanent = True
+        
         mock_service = Mock()
-        mock_service.users.return_value.getProfile.return_value.execute.return_value = {
+        mock_profile = Mock()
+        mock_profile.execute.return_value = {
             'emailAddress': 'test@example.com'
         }
+        mock_users = Mock()
+        mock_users.getProfile.return_value = mock_profile
+        mock_service.users.return_value = mock_users
         mock_build_services.return_value = (mock_service, None)
+        
+        # Ensure get_action_history returns a list of dicts matching ActionLog.to_dict() format
+        # This matches what get_action_history() actually returns (via entry.to_dict())
         mock_action_history.return_value = [
-            {'msg_id': '1', 'ai_category': 'IMPORTANT', 'action_taken': 'MOVE'}
+            {
+                'msg_id': '1',
+                'message_id': '1',
+                'subject': 'Test Email 1',
+                'original_subject': 'Test Email 1',
+                'ai_category': 'IMPORTANT',
+                'action_taken': 'MOVED to AI_IMPORTANT',
+                'is_followup_pending': False,
+                'expected_reply_date': None,
+                'followup_sent': False,
+                'reason': 'Test reason',
+                'ai_description': 'Test reason',
+                'timestamp': '2025-12-15T10:00:00',
+                'details': {}
+            }
         ]
         mock_calculate_stats.return_value = {
             'total_processed': 1,
@@ -165,29 +204,36 @@ class TestIntegrationFlow:
             'errors': 0
         }
         mock_daily_stats.return_value = {'2025-12-12': 1}
+        mock_followup_stats.return_value = {'pending': 0, 'overdue': 0}
         
-        # Set authenticated session
-        mock_credentials = json.dumps({
-            'token': 'test-token',
-            'refresh_token': 'test-refresh',
-            'token_uri': 'https://oauth2.googleapis.com/token',
-            'client_id': 'test-client-id',
-            'client_secret': 'test-client-secret',
-            'scopes': ['https://www.googleapis.com/auth/gmail.readonly']
-        })
+        # Mock Redis to prevent connection attempts
+        mock_redis_instance = Mock()
+        mock_redis_instance.ping.return_value = True
+        mock_redis_class.from_url.return_value = mock_redis_instance
         
-        with client.session_transaction() as sess:
-            sess['credentials'] = mock_credentials
+        # CRITICAL FIX: logged_in_client fixture already sets credentials in session
+        # No need to set them again - just use logged_in_client directly
         
         # Clear cache before test to ensure function executes
         from flask import current_app
-        with client.application.app_context():
+        with logged_in_client.application.app_context():
             cache = current_app.extensions.get('cache')
             if cache:
                 cache.clear()
         
+        # CRITICAL FIX: Use logged_in_client instead of client for proper session handling
         # Test dashboard
-        response = client.get('/')
+        response = logged_in_client.get('/')
+        
+        # Debug: print response if error
+        if response.status_code != 200:
+            response_text = response.get_data(as_text=True)
+            print(f"\n=== DEBUG: Response status: {response.status_code} ===")
+            print(f"Response data (first 1000 chars): {response_text[:1000]}")
+            print("=== END DEBUG ===\n")
+            # Re-raise to see full traceback
+            raise AssertionError(f"Expected 200, got {response.status_code}. Response: {response_text[:500]}")
+        
         assert response.status_code == 200
         
         # Verify all functions were called
@@ -196,4 +242,5 @@ class TestIntegrationFlow:
         mock_action_history.assert_called_once()
         mock_calculate_stats.assert_called_once()
         mock_daily_stats.assert_called_once()
+        mock_followup_stats.assert_called_once()
 

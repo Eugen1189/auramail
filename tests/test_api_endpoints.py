@@ -94,10 +94,16 @@ class TestAPIEndpoints:
                 assert 'status' in data
                 # Note: Value may be from cache or mock, structure is what matters
     
-    def test_sort_requires_authentication(self, client):
+    def test_sort_requires_authentication(self, app):
         """Test that /sort endpoint requires authentication."""
-        response = client.get('/sort')
-        
-        # Should redirect to login or return 401
-        assert response.status_code in [302, 401, 403]
+        # Create client WITHOUT credentials to test authentication requirement
+        with app.test_client() as client:
+            # Ensure no credentials in session
+            with client.session_transaction() as sess:
+                sess.pop('credentials', None)  # Remove any credentials
+            
+            response = client.get('/sort')
+            
+            # Should redirect to login or return 401
+            assert response.status_code in [302, 401, 403]
 
