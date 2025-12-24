@@ -301,14 +301,21 @@ def _background_sort_task_impl(credentials_json):
         except: pass
         
         # 1. Збір листів (послідовно) - БЕЗКОШТОВНО (в межах лімітів Google)
+        # CRITICAL: includeSpamTrash=True необхідний для доступу до папок SPAM та TRASH
+        # Gmail API за замовчуванням приховує ці папки навіть якщо ми їх запитуємо
         all_messages = []
         for folder_id in FOLDERS_TO_PROCESS:
             try:
                 next_page_token = None
                 while True:
                     results = main_service.users().messages().list(
-                        userId='me', labelIds=[folder_id], pageToken=next_page_token, maxResults=50
+                        userId='me', 
+                        labelIds=[folder_id], 
+                        pageToken=next_page_token, 
+                        maxResults=50,
+                        includeSpamTrash=True  # CRITICAL: Дозволяє читати листи з SPAM та TRASH
                     ).execute()
+                    
                     msgs = results.get('messages', [])
                     all_messages.extend(msgs)
                     if not msgs or len(all_messages) >= MAX_MESSAGES_TO_PROCESS * 1.5:
@@ -605,6 +612,21 @@ def _background_sort_task_impl(credentials_json):
         
         # Save report to database instead of JSON file
         save_report(stats)
+        
+        # CRITICAL: Clear cache after task completion to ensure dashboard shows fresh data
+        try:
+            from app_factory import create_app
+            app = create_app()
+            with app.app_context():
+                cache = app.cache
+                if cache and hasattr(cache, 'clear'):
+                    cache.clear()
+                    print("✅ [Cache] Dashboard cache cleared successfully")
+                else:
+                    print("⚠️ [Cache] Cache invalidation skipped (NullCache or no clear method)")
+        except Exception as cache_error:
+            print(f"⚠️ [Cache] Cache invalidation error: {cache_error}")
+            # Don't fail the task if cache clearing fails - it's not critical
             
         elapsed = time.time() - start_time
         gemini_calls = total_processed  # Кількість викликів Gemini = кількість оброблених нових листів

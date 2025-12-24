@@ -120,6 +120,24 @@
             box-shadow: 0 6px 25px rgba(74, 144, 226, 0.4);
         }
 
+        .btn-export {
+            padding: 10px 16px;
+            background: rgba(74, 144, 226, 0.1);
+            border: 1px solid rgba(74, 144, 226, 0.3);
+            border-radius: 8px;
+            color: var(--accent-blue);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-export:hover {
+            background: rgba(74, 144, 226, 0.2);
+            border-color: var(--accent-blue);
+            transform: translateY(-1px);
+        }
+
         .btn-voice-search-header.recording {
             background: linear-gradient(135deg, var(--danger), #FF6B6B);
             animation: pulse 1.5s ease-in-out infinite;
@@ -1080,6 +1098,48 @@
     </div>
 
     <script>
+        // Export Functions - Make them globally available FIRST (before any onclick handlers)
+        function exportToCSV() {
+            window.location.href = '/export/csv';
+        }
+
+        function exportToPDF() {
+            window.location.href = '/export/pdf';
+        }
+        
+        // Make export functions globally available immediately
+        window.exportToCSV = exportToCSV;
+        window.exportToPDF = exportToPDF;
+        
+        // Progress Modal Functions - Make them globally available FIRST
+        function startSorting() {
+            const modal = document.getElementById('progressModal');
+            if (!modal) {
+                console.error('Progress modal not found');
+                return;
+            }
+            modal.classList.add('active');
+
+            fetch('/sort')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'started') {
+                        startPolling();
+                    } else {
+                        alert('Помилка запуску: ' + (data.message || 'Unknown error'));
+                        modal.classList.remove('active');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Помилка з\'єднання: ' + error.message);
+                    modal.classList.remove('active');
+                });
+        }
+        
+        // Make startSorting globally available immediately
+        window.startSorting = startSorting;
+        
         // Dashboard 2.0: Load Analytics Data
         async function loadAnalytics() {
             try {
@@ -1120,15 +1180,6 @@
             } catch (error) {
                 console.error('Error loading analytics:', error);
             }
-        }
-
-        // Export Functions
-        function exportToCSV() {
-            window.location.href = '/export/csv';
-        }
-
-        function exportToPDF() {
-            window.location.href = '/export/pdf';
         }
 
         // Initialize Time Chart with Real Data
@@ -1539,28 +1590,6 @@
             }
         });
 
-        // Progress Modal Functions (from original code)
-        function startSorting() {
-            const modal = document.getElementById('progressModal');
-            modal.classList.add('active');
-
-            fetch('/sort')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'started') {
-                        startPolling();
-                    } else {
-                        alert('Помилка запуску: ' + (data.message || 'Unknown error'));
-                        modal.classList.remove('active');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('Помилка з\'єднання: ' + error.message);
-                    modal.classList.remove('active');
-                });
-        }
-
         function startPolling() {
             const pollInterval = setInterval(() => {
                 fetch('/api/progress')
@@ -1573,12 +1602,12 @@
                     .then(data => {
                         if (!data || data.error) return;
 
-                        const current = data.current_message || data.current || 0;
-                        const total = data.total_messages || data.total || 0;
-                        const percent = total > 0 ? Math.round((current / total) * 100) : 0;
-                        document.getElementById('progressBar').style.width = percent + '%';
-                        document.getElementById('percentText').innerText = percent + '%';
-                        document.getElementById('countText').innerText = `${current} / ${total}`;
+                        const currentProgress = data.current_message || data.current || 0;
+                        const totalProgress = data.total_messages || data.total || 0;
+                        const progressPercent = totalProgress > 0 ? Math.round((currentProgress / totalProgress) * 100) : 0;
+                        document.getElementById('progressBar').style.width = progressPercent + '%';
+                        document.getElementById('percentText').innerText = progressPercent + '%';
+                        document.getElementById('countText').innerText = `${currentProgress} / ${totalProgress}`;
                         
                         if (data.status) {
                             const statusMap = {
@@ -1602,9 +1631,9 @@
                         const currentEmailSubject = document.getElementById('currentEmailSubject');
                         
                         if (data.current_email_subject) {
-                            let details = data.current_email_subject;
-                            if (details.length > 50) details = details.substring(0, 50) + '...';
-                            document.getElementById('detailText').innerText = details;
+                            let emailDetails = data.current_email_subject;
+                            if (emailDetails.length > 50) emailDetails = emailDetails.substring(0, 50) + '...';
+                            document.getElementById('detailText').innerText = emailDetails;
                             
                             // Показуємо детальну інформацію про поточний лист
                             if (currentEmailInfo && currentEmailSubject) {
@@ -1614,9 +1643,9 @@
                                     : data.current_email_subject;
                             }
                         } else if (data.details) {
-                            let details = data.details;
-                            if (details.length > 50) details = details.substring(0, 50) + '...';
-                            document.getElementById('detailText').innerText = details;
+                            let statusDetails = data.details;
+                            if (statusDetails.length > 50) statusDetails = statusDetails.substring(0, 50) + '...';
+                            document.getElementById('detailText').innerText = statusDetails;
                             
                             // Приховуємо детальну інформацію, якщо немає поточного листа
                             if (currentEmailInfo) {
@@ -1647,24 +1676,22 @@
                             document.getElementById('statErrors').innerText = data.stats.errors || 0;
                         }
                         
-                        // Оновлення інформації про прогрес роботи
-                        const current = data.current_message || data.current || 0;
-                        const total = data.total_messages || data.total || 0;
-                        const remaining = Math.max(0, total - current);
+                        // Оновлення інформації про прогрес роботи (використовуємо вже існуючі змінні)
+                        const remainingCount = Math.max(0, totalProgress - currentProgress);
                         
-                        if (total > 0) {
-                            document.getElementById('progressInfo').innerText = `${current} / ${total}`;
+                        if (totalProgress > 0) {
+                            document.getElementById('progressInfo').innerText = `${currentProgress} / ${totalProgress}`;
                             
                             // Детальна інформація про прогрес
-                            let progressDetails = '';
-                            if (current === 0 && total > 0) {
-                                progressDetails = 'Підготовка до обробки...';
-                            } else if (current < total) {
-                                progressDetails = `Залишилось обробити: ${remaining} листів`;
+                            let progressDetailsText = '';
+                            if (currentProgress === 0 && totalProgress > 0) {
+                                progressDetailsText = 'Підготовка до обробки...';
+                            } else if (currentProgress < totalProgress) {
+                                progressDetailsText = `Залишилось обробити: ${remainingCount} листів`;
                             } else {
-                                progressDetails = 'Всі листи оброблено!';
+                                progressDetailsText = 'Всі листи оброблено!';
                             }
-                            document.getElementById('progressDetails').innerText = progressDetails;
+                            document.getElementById('progressDetails').innerText = progressDetailsText;
                         } else {
                             document.getElementById('progressInfo').innerText = '0 / 0';
                             document.getElementById('progressDetails').innerText = 'Очікування початку обробки...';
@@ -1675,7 +1702,7 @@
                         const isCompleted = data.status && data.status.toLowerCase() === 'completed';
                         const isProgressComplete = (data.current_message >= data.total_messages && data.total_messages > 0) ||
                                                    (data.current >= data.total && data.total > 0);
-                        const is100Percent = percent >= 100;
+                        const is100Percent = progressPercent >= 100;
 
                         if (isCompleted || isProgressComplete || is100Percent) {
                             clearInterval(pollInterval);
@@ -1686,10 +1713,10 @@
                             }
                             
                             // Ensure progress bar shows 100%
-                            if (percent < 100 && data.total > 0) {
+                            if (progressPercent < 100 && totalProgress > 0) {
                                 document.getElementById('progressBar').style.width = '100%';
                                 document.getElementById('percentText').innerText = '100%';
-                                document.getElementById('countText').innerText = `${data.total} / ${data.total}`;
+                                document.getElementById('countText').innerText = `${totalProgress} / ${totalProgress}`;
                             }
                             
                             // Hide "waiting" message and show "Ok" button
@@ -1729,9 +1756,13 @@
             }, 300);
         }
         
-        // Ensure startSorting is available globally
-        window.startSorting = startSorting;
+        // Ensure functions are available globally (already set above, but keeping for clarity)
         window.closeProgressModal = closeProgressModal;
+        
+        // Load analytics on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadAnalytics();
+        });
     </script>
 </body>
 </html>

@@ -30,8 +30,9 @@ def calculate_time_savings(days: int = 30) -> Dict:
     start_date = end_date - timedelta(days=days)
     
     # Get processed emails in date range
+    # Use timestamp field (not created_at) - ActionLog uses timestamp
     processed_count = ActionLog.query.filter(
-        ActionLog.created_at >= start_date
+        ActionLog.timestamp >= start_date
     ).count()
     
     # Calculate time savings
@@ -71,8 +72,9 @@ def calculate_ai_costs(days: int = 30) -> Dict:
     start_date = end_date - timedelta(days=days)
     
     # Get processed emails in date range
+    # Use timestamp field (not created_at) - ActionLog uses timestamp
     processed_count = ActionLog.query.filter(
-        ActionLog.created_at >= start_date
+        ActionLog.timestamp >= start_date
     ).count()
     
     # Calculate AI costs
@@ -101,25 +103,44 @@ def calculate_roi(days: int = 30) -> Dict:
     Returns:
         Dictionary with ROI metrics
     """
-    time_savings = calculate_time_savings(days)
-    ai_costs = calculate_ai_costs(days)
-    
-    cost_saved = time_savings['cost_saved_usd']
-    ai_cost = ai_costs['total_cost_usd']
-    net_savings = cost_saved - ai_cost
-    
-    roi_percentage = ((net_savings / ai_cost) * 100) if ai_cost > 0 else 0
-    
-    return {
-        'period_days': days,
-        'cost_saved_usd': cost_saved,
-        'ai_cost_usd': ai_cost,
-        'net_savings_usd': round(net_savings, 2),
-        'roi_percentage': round(roi_percentage, 2),
-        'break_even_days': round(ai_cost / (time_savings['average_per_day']['cost_usd']), 1) if time_savings['average_per_day']['cost_usd'] > 0 else 0,
-        'time_savings': time_savings,
-        'ai_costs': ai_costs
-    }
+    try:
+        time_savings = calculate_time_savings(days)
+        ai_costs = calculate_ai_costs(days)
+        
+        cost_saved = time_savings.get('cost_saved_usd', 0)
+        ai_cost = ai_costs.get('total_cost_usd', 0)
+        net_savings = cost_saved - ai_cost
+        
+        # Prevent division by zero
+        roi_percentage = ((net_savings / ai_cost) * 100) if ai_cost > 0 else 0
+        
+        # Prevent division by zero for break_even_days
+        avg_daily_cost = time_savings.get('average_per_day', {}).get('cost_usd', 0)
+        break_even_days = round(ai_cost / avg_daily_cost, 1) if avg_daily_cost > 0 else 0
+        
+        return {
+            'period_days': days,
+            'cost_saved_usd': cost_saved,
+            'ai_cost_usd': ai_cost,
+            'net_savings_usd': round(net_savings, 2),
+            'roi_percentage': round(roi_percentage, 2),
+            'break_even_days': break_even_days,
+            'time_savings': time_savings,
+            'ai_costs': ai_costs
+        }
+    except Exception as e:
+        # Return safe defaults if calculation fails (e.g., no data in database)
+        return {
+            'period_days': days,
+            'cost_saved_usd': 0,
+            'ai_cost_usd': 0,
+            'net_savings_usd': 0,
+            'roi_percentage': 0,
+            'break_even_days': 0,
+            'time_savings': {'emails_processed': 0, 'total_hours_saved': 0, 'cost_saved_usd': 0},
+            'ai_costs': {'emails_processed': 0, 'total_cost_usd': 0},
+            'error': str(e)
+        }
 
 
 def get_time_savings_chart_data(days: int = 30) -> Dict:
@@ -146,8 +167,8 @@ def get_time_savings_chart_data(days: int = 30) -> Dict:
         date_end = datetime.combine(date.date(), datetime.max.time())
         
         count = ActionLog.query.filter(
-            ActionLog.created_at >= date_start,
-            ActionLog.created_at <= date_end
+            ActionLog.timestamp >= date_start,
+            ActionLog.timestamp <= date_end
         ).count()
         
         hours = (count * AVERAGE_TIME_PER_EMAIL_SECONDS) / 3600
@@ -196,7 +217,7 @@ def get_category_distribution(days: int = 30) -> Dict:
         ActionLog.ai_category,
         db.func.count(ActionLog.id).label('count')
     ).filter(
-        ActionLog.created_at >= start_date
+        ActionLog.timestamp >= start_date
     ).group_by(ActionLog.ai_category).all()
     
     labels = []

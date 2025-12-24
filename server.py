@@ -5,7 +5,7 @@ Contains only Flask routes, authentication, and server startup.
 import os
 import sys
 import json
-from flask import redirect, url_for, session, request, render_template, flash, jsonify
+from flask import redirect, url_for, session, request, render_template, flash, jsonify, make_response
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 from redis import Redis
@@ -363,11 +363,31 @@ if app.config.get('TESTING'):
             session.pop('credentials', None)  # Clear invalid credentials
             return redirect(url_for('authorize'))
 else:
-    @app.route('/')
-    @cache.cached(timeout=CACHE_DASHBOARD_STATS_TIMEOUT, key_prefix='dashboard_index')
+    @app.route('/', methods=['GET'])
     def index():
+        """
+        Main dashboard route. Returns HTML dashboard page.
+        NOT a CSV export - ensure Content-Type is text/html.
+        """
+        # CRITICAL: Log that we're in the index route, not export
+        logger.info("INDEX ROUTE CALLED - Returning HTML dashboard, NOT CSV")
+        
+        # CRITICAL: Clear any cached responses that might be interfering
+        try:
+            if hasattr(app, 'cache'):
+                app.cache.clear()  # Clear entire cache
+                logger.debug("Cache cleared")
+        except Exception as e:
+            logger.warning(f"Cache clear failed: {e}")
+        
         if 'credentials' not in session:
-            return render_template('login.html')
+            logger.info("No credentials - showing login page")
+            response = make_response(render_template('login.html'))
+            response.headers['Content-Type'] = 'text/html; charset=utf-8'
+            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+            return response
         
         # User is authenticated, show dashboard
         try:
@@ -412,14 +432,22 @@ else:
                 ActionLog.ai_category.in_(['DANGER', 'SPAM'])
             ).count()
             
-            return render_template('dashboard.html', 
+            # CRITICAL: Explicitly set Content-Type to HTML to prevent CSV download
+            logger.info("Rendering dashboard.html - Content-Type will be text/html")
+            response = make_response(render_template('dashboard.html', 
                                  user_email=user_email,
                                  recent_activities=recent_activities,
                                  stats=stats,
                                  daily_stats=daily_stats,
                                  followup_stats=followup_stats,
                                  dashboard_state=dashboard_state,
-                                 dangerous_emails_count=dangerous_emails)
+                                 dangerous_emails_count=dangerous_emails))
+            response.headers['Content-Type'] = 'text/html; charset=utf-8'
+            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+            logger.info(f"Response Content-Type: {response.headers.get('Content-Type')}")
+            return response
         except Exception as e:
             # If error occurs, clear credentials and redirect to authorize to prevent loop
             logger.error(f"Error loading dashboard: {e}")
@@ -431,6 +459,21 @@ else:
 # --- 4. ОНОВЛЕНИЙ МАРШРУТ ЗАПУСКУ (тепер миттєвий) ---
 @app.route('/sort')
 def start_sort_job():
+    """
+    Starts email sorting task asynchronously via Redis RQ.
+    
+    NOTE: If you ever add synchronous sorting logic here (not recommended),
+    make sure to use includeSpamTrash=True in Gmail API messages().list() calls
+    to access SPAM and TRASH folders. Example:
+    
+        results = service.users().messages().list(
+            userId='me', 
+            labelIds=[folder_id], 
+            includeSpamTrash=True  # CRITICAL for SPAM/TRASH access
+        ).execute()
+    
+    Current implementation uses async worker (tasks.py) which already includes this.
+    """
     if 'credentials' not in session:
         return jsonify({'status': 'error', 'message': 'Not authorized'}), 401
     
@@ -446,6 +489,7 @@ def start_sort_job():
         # Ставимо задачу в чергу напряму
         # Worker will create Flask app context automatically via wrapper
         # Set timeout to 15 minutes (900 seconds) for long-running tasks (Gemini API, Gmail API)
+        # NOTE: background_sort_task in tasks.py already uses includeSpamTrash=True
         job = q.enqueue(background_sort_task, session['credentials'], job_timeout=900)
         
         return jsonify({
@@ -471,74 +515,128 @@ def start_sort_job():
 
 
 # --- 4a. EXPORT ROUTES (CSV/PDF) ---
-@app.route('/export/csv')
+@app.route('/export/csv', methods=['GET'])
 def export_csv():
-    """Export sorting results to CSV."""
+    """Експорт історії дій у CSV форматі з бази даних ActionLog."""
+    logger.info("EXPORT CSV ROUTE CALLED - This should only be called when user clicks export button")
     if 'credentials' not in session:
         return jsonify({'status': 'error', 'message': 'Not authorized'}), 401
     
     try:
-        from utils.export import export_to_csv
-        from datetime import datetime as dt
+        import csv
+        import io
+        from flask import make_response
+        from datetime import datetime
         
-        # Get optional date filters
-        start_date_str = request.args.get('start_date')
-        end_date_str = request.args.get('end_date')
+        # Отримуємо всі записи з бази даних (нові first)
+        logs = ActionLog.query.order_by(ActionLog.timestamp.desc()).all()
         
-        start_date = dt.fromisoformat(start_date_str) if start_date_str else None
-        end_date = dt.fromisoformat(end_date_str) if end_date_str else None
+        # Створюємо CSV у пам'яті
+        si = io.StringIO()
+        cw = csv.writer(si)
         
-        csv_buffer = export_to_csv(start_date, end_date)
+        # Заголовки
+        cw.writerow(['ID', 'Timestamp', 'Message ID', 'Subject', 'Category', 'Action', 'Reason', 'Follow-up Pending', 'Expected Reply Date'])
         
-        filename = f'auramail_export_{dt.now().strftime("%Y%m%d_%H%M%S")}.csv'
+        # Дані
+        for log in logs:
+            cw.writerow([
+                log.id,
+                log.timestamp.strftime('%Y-%m-%d %H:%M:%S') if log.timestamp else '',
+                log.msg_id,
+                log.subject[:100] if log.subject else '',  # Limit subject length
+                log.ai_category,
+                log.action_taken,
+                log.reason[:200] if log.reason else '',  # Limit reason length
+                'Yes' if log.is_followup_pending else 'No',
+                log.expected_reply_date.strftime('%Y-%m-%d') if log.expected_reply_date else ''
+            ])
         
-        from flask import Response
-        return Response(
-            csv_buffer.getvalue(),
-            mimetype='text/csv',
-            headers={'Content-Disposition': f'attachment; filename={filename}'}
-        )
+        output = make_response(si.getvalue())
+        filename = f'auramail_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+        output.headers["Content-Disposition"] = f"attachment; filename={filename}"
+        output.headers["Content-type"] = "text/csv; charset=utf-8"
+        return output
     except Exception as e:
-        logger.error(f"CSV export error: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        logger.error(f"CSV Export Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 
-@app.route('/export/pdf')
+@app.route('/export/pdf', methods=['GET'])
 def export_pdf():
-    """Export sorting results to PDF."""
+    """Експорт історії дій у PDF форматі з бази даних ActionLog."""
     if 'credentials' not in session:
         return jsonify({'status': 'error', 'message': 'Not authorized'}), 401
     
     try:
-        from utils.export import export_to_pdf
-        from datetime import datetime as dt
+        # Перевірка бібліотеки
+        try:
+            from reportlab.lib.pagesizes import letter
+            from reportlab.pdfgen import canvas
+            from reportlab.lib import colors
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+            from reportlab.lib.styles import getSampleStyleSheet
+        except ImportError:
+            logger.error("reportlab is required for PDF export")
+            return jsonify({'error': 'Library reportlab not installed. Install with: pip install reportlab'}), 500
+
+        import io
+        from datetime import datetime
+        from flask import send_file
         
-        # Get optional date filters
-        start_date_str = request.args.get('start_date')
-        end_date_str = request.args.get('end_date')
+        # Отримуємо записи з бази даних (ліміт 100 для PDF щоб не був гігантським)
+        logs = ActionLog.query.order_by(ActionLog.timestamp.desc()).limit(100).all()
         
-        start_date = dt.fromisoformat(start_date_str) if start_date_str else None
-        end_date = dt.fromisoformat(end_date_str) if end_date_str else None
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter)
+        elements = []
+        styles = getSampleStyleSheet()
         
-        pdf_bytes = export_to_pdf(start_date, end_date)
+        # Заголовок
+        elements.append(Paragraph("AuraMail Activity Report", styles['Title']))
+        elements.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles['Normal']))
+        elements.append(Paragraph(f"Total Records: {len(logs)}", styles['Normal']))
+        elements.append(Paragraph("<br/><br/>", styles['Normal']))
         
-        filename = f'auramail_report_{dt.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+        # Таблиця
+        data = [['Time', 'Action', 'Category', 'Subject']]
+        for log in logs:
+            subj = log.subject[:40] + '...' if len(log.subject) > 40 else log.subject
+            time_str = log.timestamp.strftime('%Y-%m-%d %H:%M') if log.timestamp else 'N/A'
+            data.append([time_str, log.action_taken, log.ai_category, subj])
         
-        from flask import Response
-        return Response(
-            pdf_bytes,
-            mimetype='application/pdf',
-            headers={'Content-Disposition': f'attachment; filename={filename}'}
+        t = Table(data, colWidths=[100, 80, 100, 300])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
+        ]))
+        elements.append(t)
+        
+        doc.build(elements)
+        buffer.seek(0)
+        
+        filename = f'auramail_report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+        return send_file(
+            buffer,
+            as_attachment=True,
+            download_name=filename,
+            mimetype='application/pdf'
         )
-    except ImportError as e:
-        logger.error(f"PDF export error: {e}")
-        return jsonify({
-            'status': 'error',
-            'message': 'PDF export requires reportlab. Install with: pip install reportlab'
-        }), 500
     except Exception as e:
-        logger.error(f"PDF export error: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        logger.error(f"PDF Export Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 
 # --- 4b. ANALYTICS API ENDPOINTS ---
@@ -763,6 +861,72 @@ def save_followup_credentials():
 def metrics():
     """Prometheus metrics endpoint."""
     return metrics_endpoint()
+
+
+# --- 10. ANALYTICS API ENDPOINTS (Dashboard 2.0) ---
+@app.route('/api/analytics/roi')
+def api_analytics_roi():
+    """Returns ROI analytics data."""
+    try:
+        from utils.analytics import calculate_roi
+        days = request.args.get('days', 30, type=int)
+        roi_data = calculate_roi(days)
+        return jsonify(roi_data)
+    except Exception as e:
+        logger.error(f"Error calculating ROI: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'period_days': request.args.get('days', 30, type=int),
+            'cost_saved_usd': 0,
+            'ai_cost_usd': 0,
+            'net_savings_usd': 0,
+            'roi_percentage': 0
+        }), 500
+
+
+@app.route('/api/analytics/time-savings')
+def api_analytics_time_savings():
+    """Returns time savings analytics data."""
+    try:
+        from utils.analytics import calculate_time_savings
+        days = request.args.get('days', 30, type=int)
+        time_data = calculate_time_savings(days)
+        return jsonify(time_data)
+    except Exception as e:
+        logger.error(f"Error calculating time savings: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'period_days': request.args.get('days', 30, type=int),
+            'emails_processed': 0,
+            'total_hours_saved': 0,
+            'cost_saved_usd': 0
+        }), 500
+
+
+@app.route('/api/analytics/chart-data')
+def api_analytics_chart_data():
+    """Returns chart data for time savings visualization."""
+    try:
+        from utils.analytics import get_time_savings_chart_data
+        days = request.args.get('days', 30, type=int)
+        chart_type = request.args.get('type', 'time-savings')
+        
+        if chart_type == 'time-savings':
+            chart_data = get_time_savings_chart_data(days)
+        else:
+            chart_data = {'labels': [], 'datasets': []}
+        
+        return jsonify(chart_data)
+    except Exception as e:
+        logger.error(f"Error generating chart data: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'labels': [],
+            'datasets': []
+        }), 500
 
 
 # --- VOICE SEARCH ENDPOINT ---

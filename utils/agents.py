@@ -31,14 +31,25 @@ class LibrarianAgent:
             Dictionary with status and message
         """
         try:
-            # Get count of messages in INBOX
+            # Get count of messages in INBOX and SPAM
+            # CRITICAL: Для SPAM потрібно додати includeSpamTrash=True
             inbox_messages = gmail_service.users().messages().list(
                 userId='me',
                 labelIds=['INBOX'],
                 maxResults=1
             ).execute()
             
+            # Also check SPAM folder (Gmail API requires includeSpamTrash=True)
+            spam_messages = gmail_service.users().messages().list(
+                userId='me',
+                labelIds=['SPAM'],
+                includeSpamTrash=True,
+                maxResults=1
+            ).execute()
+            
             inbox_count = inbox_messages.get('resultSizeEstimate', 0)
+            spam_count = spam_messages.get('resultSizeEstimate', 0)
+            total_unprocessed = inbox_count + spam_count
             
             # Get count of processed emails from database
             processed_count = ActionLog.query.count()
@@ -47,25 +58,31 @@ class LibrarianAgent:
             progress = get_progress()
             status = progress.get('status', 'Idle')
             
-            if inbox_count == 0 and processed_count > 0:
+            if total_unprocessed == 0 and processed_count > 0:
                 return {
                     'status': 'sorted',
                     'message': 'Ваша пошта вже розсортована. Все чисто!',
                     'inbox_count': inbox_count,
+                    'spam_count': spam_count,
+                    'total_unprocessed': total_unprocessed,
                     'processed_count': processed_count
                 }
-            elif status == 'Completed' and inbox_count == 0:
+            elif status == 'Completed' and total_unprocessed == 0:
                 return {
                     'status': 'sorted',
                     'message': 'Ваша пошта вже розсортована. Все чисто!',
                     'inbox_count': inbox_count,
+                    'spam_count': spam_count,
+                    'total_unprocessed': total_unprocessed,
                     'processed_count': processed_count
                 }
             else:
                 return {
                     'status': 'pending',
-                    'message': f'Знайдено {inbox_count} листів для обробки',
+                    'message': f'Знайдено {total_unprocessed} листів для обробки ({inbox_count} у INBOX, {spam_count} у SPAM)',
                     'inbox_count': inbox_count,
+                    'spam_count': spam_count,
+                    'total_unprocessed': total_unprocessed,
                     'processed_count': processed_count
                 }
         except Exception as e:
@@ -73,6 +90,8 @@ class LibrarianAgent:
                 'status': 'error',
                 'message': f'Помилка перевірки стану: {str(e)}',
                 'inbox_count': 0,
+                'spam_count': 0,
+                'total_unprocessed': 0,
                 'processed_count': 0
             }
     

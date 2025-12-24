@@ -27,9 +27,9 @@ def calculate_stats(start_date: Optional[datetime] = None, end_date: Optional[da
     query = ActionLog.query
     
     if start_date:
-        query = query.filter(ActionLog.created_at >= start_date)
+        query = query.filter(ActionLog.timestamp >= start_date)
     if end_date:
-        query = query.filter(ActionLog.created_at <= end_date)
+        query = query.filter(ActionLog.timestamp <= end_date)
     
     logs = query.all()
     
@@ -76,21 +76,26 @@ def export_to_csv(start_date: Optional[datetime] = None, end_date: Optional[date
     query = ActionLog.query
     
     if start_date:
-        query = query.filter(ActionLog.created_at >= start_date)
+        query = query.filter(ActionLog.timestamp >= start_date)
     if end_date:
-        query = query.filter(ActionLog.created_at <= end_date)
+        query = query.filter(ActionLog.timestamp <= end_date)
     
-    logs = query.order_by(ActionLog.created_at.desc()).all()
+    logs = query.order_by(ActionLog.timestamp.desc()).all()
     
     # Write data rows
     for log in logs:
+        # Extract urgency from details if available
+        urgency = ''
+        if log.details and isinstance(log.details, dict):
+            urgency = log.details.get('urgency', '')
+        
         writer.writerow([
             log.msg_id,
             log.subject or '',
             log.ai_category or '',
             log.action_taken or '',
-            log.urgency or '',
-            log.created_at.strftime('%Y-%m-%d %H:%M:%S') if log.created_at else '',
+            urgency,
+            log.timestamp.strftime('%Y-%m-%d %H:%M:%S') if log.timestamp else '',
             log.expected_reply_date.strftime('%Y-%m-%d') if log.expected_reply_date else '',
             'Yes' if log.is_followup_pending else 'No',
             log.reason or ''
@@ -186,11 +191,11 @@ def export_to_pdf(start_date: Optional[datetime] = None, end_date: Optional[date
         query = ActionLog.query
         
         if start_date:
-            query = query.filter(ActionLog.created_at >= start_date)
+            query = query.filter(ActionLog.timestamp >= start_date)
         if end_date:
-            query = query.filter(ActionLog.created_at <= end_date)
+            query = query.filter(ActionLog.timestamp <= end_date)
         
-        logs = query.order_by(ActionLog.created_at.desc()).limit(100).all()  # Limit to 100 for PDF
+        logs = query.order_by(ActionLog.timestamp.desc()).limit(100).all()  # Limit to 100 for PDF
         
         if logs:
             elements.append(Paragraph("Recent Activity (Last 100)", styles['Heading2']))
@@ -201,7 +206,7 @@ def export_to_pdf(start_date: Optional[datetime] = None, end_date: Optional[date
             
             for log in logs:
                 table_data.append([
-                    log.created_at.strftime('%Y-%m-%d') if log.created_at else '',
+                    log.timestamp.strftime('%Y-%m-%d') if log.timestamp else '',
                     (log.subject or '')[:50],  # Truncate long subjects
                     log.ai_category or '',
                     log.action_taken or ''
@@ -248,11 +253,11 @@ def get_export_data(start_date: Optional[datetime] = None, end_date: Optional[da
     query = ActionLog.query
     
     if start_date:
-        query = query.filter(ActionLog.created_at >= start_date)
+        query = query.filter(ActionLog.timestamp >= start_date)
     if end_date:
-        query = query.filter(ActionLog.created_at <= end_date)
+        query = query.filter(ActionLog.timestamp <= end_date)
     
-    logs = query.order_by(ActionLog.created_at.desc()).all()
+    logs = query.order_by(ActionLog.timestamp.desc()).all()
     
     # Calculate stats from logs
     stats = {

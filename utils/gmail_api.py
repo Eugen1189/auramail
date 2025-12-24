@@ -110,11 +110,12 @@ def get_message_content(service, msg_id):
 def get_or_create_label_id(service, label_name, label_cache, category=None):
     """
     Checks if label exists and returns its ID. If not — creates it.
+    Supports hierarchical labels (e.g., "AuraMail/Category") by creating parent labels first.
     Uses cache for quick access without repeated API requests.
     
     Args:
         service: Initialized Gmail API service object
-        label_name: Label name
+        label_name: Label name (supports hierarchy like "AuraMail/Category")
         label_cache: Dictionary for storing label IDs {"Label Name": "Label ID"}
         category: Optional category name for color mapping (e.g., 'IMPORTANT', 'BILLS_INVOICES')
     
@@ -135,17 +136,28 @@ def get_or_create_label_id(service, label_name, label_cache, category=None):
         if label['name'] == label_name:
             return label_cache[label_name]
     
-    # 2. If label not found, create it
+    # 2. If label has hierarchy (contains '/'), ensure parent label exists first
+    if '/' in label_name:
+        parent_label = label_name.split('/')[0]
+        # Recursively create parent label if it doesn't exist
+        if parent_label not in label_cache:
+            get_or_create_label_id(service, parent_label, label_cache, category="DEFAULT")
+    
+    # 3. If label not found, create it
     label_body = {
         'name': label_name,
         'labelListVisibility': 'labelShow',
         'messageListVisibility': 'show'
     }
     
-    # Add color for AI labels based on category
+    # Add color for AI labels and AuraMail labels based on category
     # Try to set color, but if it fails, create label without color
     color_added = False
-    if label_name.startswith('AI_'):
+    
+    # Support both "AI_" prefix and "AuraMail/" hierarchy
+    is_ai_label = label_name.startswith('AI_') or label_name.startswith('AuraMail/')
+    
+    if is_ai_label:
         # Determine category: use provided category or extract from label name
         detected_category = None
         
@@ -154,7 +166,7 @@ def get_or_create_label_id(service, label_name, label_cache, category=None):
             detected_category = category.upper() if category else None
         else:
             # Try to match label name to category
-            # Format: AI_CATEGORY_NAME or AI_BILLS, AI_IMPORTANT, etc.
+            # Format: AI_CATEGORY_NAME, AuraMail/Category, etc.
             label_upper = label_name.upper()
             for cat in LABEL_COLOR_MAP.keys():
                 if cat != 'DEFAULT' and cat in label_upper:
@@ -204,8 +216,12 @@ def get_or_create_label_id(service, label_name, label_cache, category=None):
 
 def process_message_action(service, msg_id, classification_data, label_cache):
     """
-    Executes action (MOVE, ARCHIVE) on email based on classification.
-    Note: DELETE action is no longer supported. All emails are preserved in All Mail.
+    Executes smart action on email based on classification.
+    
+    NEW LOGIC (Smart Inbox Management):
+    - Important emails (ACTION_REQUIRED, URGENT, PERSONAL, IMPORTANT) stay in INBOX with labels
+    - Social/Promotions/Newsletters are archived (removed from INBOX)
+    - Spam/Danger emails are moved to AuraMail/Security Alerts folder
     
     Args:
         service: Initialized Gmail API service object
@@ -217,6 +233,7 @@ def process_message_action(service, msg_id, classification_data, label_cache):
         String with action execution status
     """
     action = classification_data.get('action')
+    category = classification_data.get('category', '').upper()
     label_name = classification_data.get('label_name')  # May be None for ARCHIVE
     
     try:
@@ -224,39 +241,120 @@ def process_message_action(service, msg_id, classification_data, label_cache):
         if action == "DELETE":
             action = "ARCHIVE"
         
-        if action == "MOVE":
-            # MOVE action: Add new label and remove from INBOX
+        # Додаємо мітку "AuraMail_Sorted" для захисту від дублювання
+        processed_label_name = "AuraMail_Sorted"
+        processed_label_id = get_or_create_label_id(service, processed_label_name, label_cache, category="DEFAULT")
+        
+        # Define categories that should stay in INBOX (only add label, don't archive)
+        INBOX_CATEGORIES = ['ACTION_REQUIRED', 'URGENT', 'PERSONAL', 'IMPORTANT', 'BILLS_INVOICES']
+        
+        # Define categories that should be archived (removed from INBOX)
+        ARCHIVE_CATEGORIES = ['SOCIAL', 'PROMOTIONS', 'NEWSLETTER', 'MARKETING', 'SUBSCRIPTION']
+        
+        # Define categories that should be moved to Security Alerts
+        SECURITY_CATEGORIES = ['SPAM', 'DANGER']
+        
+        # Define categories that need manual review (stay in INBOX with AI_REVIEW label)
+        REVIEW_CATEGORIES = ['REVIEW']
+        
+        # Determine actual action based on category (override action if needed)
+        if category in SECURITY_CATEGORIES:
+            # Move Spam/Danger to Security Alerts folder
+            security_label_name = "AuraMail/Security Alerts"
+            security_label_id = get_or_create_label_id(service, security_label_name, label_cache, category="DANGER")
+            
+            modification = {
+                'addLabelIds': [security_label_id, processed_label_id],
+                'removeLabelIds': ['INBOX']
+            }
+            service.users().messages().modify(userId='me', id=msg_id, body=modification).execute()
+            return f"MOVED to {security_label_name}"
+        
+        elif category in REVIEW_CATEGORIES:
+            # Review emails: Stay in INBOX with AI_REVIEW label (Zero Trust - manual review required)
+            review_label_name = "AuraMail/AI_REVIEW"
+            review_label_id = get_or_create_label_id(service, review_label_name, label_cache, category="REVIEW")
+            
+            modification = {
+                'addLabelIds': [review_label_id, processed_label_id],
+                # DO NOT remove INBOX - keep review emails visible for manual check
+            }
+            service.users().messages().modify(userId='me', id=msg_id, body=modification).execute()
+            return f"LABELED {review_label_name} (kept in INBOX for review)"
+        
+        elif category in INBOX_CATEGORIES:
+            # Important emails: Stay in INBOX, only add label
+            if not label_name:
+                # Generate label name if not provided
+                label_name = f"AuraMail/{category}"
+            
+            # Ensure parent label exists first (for hierarchy)
+            parent_label_name = "AuraMail"
+            parent_label_id = get_or_create_label_id(service, parent_label_name, label_cache, category="DEFAULT")
+            
+            # Create category label with hierarchy
+            category_label_id = get_or_create_label_id(service, label_name, label_cache, category=category)
+            
+            modification = {
+                'addLabelIds': [category_label_id, processed_label_id],
+                # DO NOT remove INBOX - keep important emails visible
+            }
+            service.users().messages().modify(userId='me', id=msg_id, body=modification).execute()
+            return f"LABELED {label_name} (kept in INBOX)"
+        
+        elif category in ARCHIVE_CATEGORIES or action == "ARCHIVE":
+            # Archive categories: Remove from INBOX (but keep in All Mail)
+            if label_name:
+                # Add label before archiving (for organization)
+                category_label_id = get_or_create_label_id(service, label_name, label_cache, category=category)
+                modification = {
+                    'addLabelIds': [category_label_id, processed_label_id],
+                    'removeLabelIds': ['INBOX']
+                }
+            else:
+                # Just archive without label
+                modification = {
+                    'addLabelIds': [processed_label_id],
+                    'removeLabelIds': ['INBOX']
+                }
+            service.users().messages().modify(userId='me', id=msg_id, body=modification).execute()
+            return "ARCHIVED"
+        
+        elif action == "MOVE":
+            # Legacy MOVE action: Add label and remove from INBOX
             if not label_name:
                 raise ValueError("label_name обов'язковий для дії MOVE")
             
-            # Додаємо мітку "AuraMail_Sorted" для захисту від дублювання
-            processed_label_name = "AuraMail_Sorted"
-            processed_label_id = get_or_create_label_id(service, processed_label_name, label_cache, category="DEFAULT")
-            
-            # Pass category from classification_data for better color mapping
-            category = classification_data.get('category')
-            label_id = get_or_create_label_id(service, label_name, label_cache, category=category)
+            category_label_id = get_or_create_label_id(service, label_name, label_cache, category=category)
             
             modification = {
-                'addLabelIds': [label_id, processed_label_id],  # Додаємо обидві мітки
+                'addLabelIds': [category_label_id, processed_label_id],
                 'removeLabelIds': ['INBOX']
             }
             service.users().messages().modify(userId='me', id=msg_id, body=modification).execute()
             return f"MOVED to {label_name}"
-            
-        elif action == "ARCHIVE":
-            # ARCHIVE action: Remove only from INBOX (move to All Mail)
+        
+        elif action == "NO_ACTION":
+            # Only add processed label, keep in INBOX
             modification = {
-                'removeLabelIds': ['INBOX']
+                'addLabelIds': [processed_label_id]
             }
             service.users().messages().modify(userId='me', id=msg_id, body=modification).execute()
-            return "ARCHIVED"
-            
-        elif action == "NO_ACTION":
-            return "NO_ACTION taken"
+            return "NO_ACTION taken (kept in INBOX)"
             
         else:
-            return f"UNKNOWN_ACTION: {action}"
+            # Unknown action: default to keeping in INBOX with label
+            if label_name:
+                category_label_id = get_or_create_label_id(service, label_name, label_cache, category=category)
+                modification = {
+                    'addLabelIds': [category_label_id, processed_label_id]
+                }
+            else:
+                modification = {
+                    'addLabelIds': [processed_label_id]
+                }
+            service.users().messages().modify(userId='me', id=msg_id, body=modification).execute()
+            return f"LABELED (kept in INBOX) - Unknown action: {action}"
             
     except Exception as e:
         return f"ERROR: {str(e)}"
