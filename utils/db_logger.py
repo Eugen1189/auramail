@@ -493,3 +493,19 @@ def _get_followup_stats_impl():
     except Exception as e:
         print(f"⚠️ Error getting followup stats: {e}")
         return {}
+
+
+def _invalidate_cache():
+    """
+    Invalidates dashboard cache when database changes occur.
+    Handles ImportError gracefully if cache_helper is not available.
+    """
+    try:
+        from utils.cache_helper import invalidate_dashboard_cache
+        invalidate_dashboard_cache()
+    except ImportError:
+        # Cache helper not available, silently skip
+        pass
+    except Exception as e:
+        # Any other error should not break the flow
+        print(f"⚠️ Error invalidating cache: {e}")
