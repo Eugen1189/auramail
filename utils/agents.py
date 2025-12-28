@@ -31,25 +31,14 @@ class LibrarianAgent:
             Dictionary with status and message
         """
         try:
-            # Get count of messages in INBOX and SPAM
-            # CRITICAL: Для SPAM потрібно додати includeSpamTrash=True
+            # Get count of messages in INBOX
             inbox_messages = gmail_service.users().messages().list(
                 userId='me',
                 labelIds=['INBOX'],
                 maxResults=1
             ).execute()
             
-            # Also check SPAM folder (Gmail API requires includeSpamTrash=True)
-            spam_messages = gmail_service.users().messages().list(
-                userId='me',
-                labelIds=['SPAM'],
-                includeSpamTrash=True,
-                maxResults=1
-            ).execute()
-            
             inbox_count = inbox_messages.get('resultSizeEstimate', 0)
-            spam_count = spam_messages.get('resultSizeEstimate', 0)
-            total_unprocessed = inbox_count + spam_count
             
             # Get count of processed emails from database
             processed_count = ActionLog.query.count()
@@ -58,31 +47,25 @@ class LibrarianAgent:
             progress = get_progress()
             status = progress.get('status', 'Idle')
             
-            if total_unprocessed == 0 and processed_count > 0:
+            if inbox_count == 0 and processed_count > 0:
                 return {
                     'status': 'sorted',
                     'message': 'Ваша пошта вже розсортована. Все чисто!',
                     'inbox_count': inbox_count,
-                    'spam_count': spam_count,
-                    'total_unprocessed': total_unprocessed,
                     'processed_count': processed_count
                 }
-            elif status == 'Completed' and total_unprocessed == 0:
+            elif status == 'Completed' and inbox_count == 0:
                 return {
                     'status': 'sorted',
                     'message': 'Ваша пошта вже розсортована. Все чисто!',
                     'inbox_count': inbox_count,
-                    'spam_count': spam_count,
-                    'total_unprocessed': total_unprocessed,
                     'processed_count': processed_count
                 }
             else:
                 return {
                     'status': 'pending',
-                    'message': f'Знайдено {total_unprocessed} листів для обробки ({inbox_count} у INBOX, {spam_count} у SPAM)',
+                    'message': f'Знайдено {inbox_count} листів для обробки',
                     'inbox_count': inbox_count,
-                    'spam_count': spam_count,
-                    'total_unprocessed': total_unprocessed,
                     'processed_count': processed_count
                 }
         except Exception as e:
@@ -90,8 +73,6 @@ class LibrarianAgent:
                 'status': 'error',
                 'message': f'Помилка перевірки стану: {str(e)}',
                 'inbox_count': 0,
-                'spam_count': 0,
-                'total_unprocessed': 0,
                 'processed_count': 0
             }
     
@@ -232,76 +213,25 @@ class SecurityGuardAgent:
     """
     Agent responsible for security analysis of emails.
     Pre-filters emails for phishing, suspicious links, and malware.
-    
-    OPTIMIZATION: Fast Security with local blacklist to avoid unnecessary Gemini calls.
     """
     
-    # FAST SECURITY: Local blacklist of known phishing/spam domains
-    # This allows instant blocking without Gemini API calls (saves tokens)
-    PHISHING_DOMAINS_BLACKLIST = {
-        # Temporary email services (often used for spam)
-        'tempmail.com', '10minutemail.com', 'guerrillamail.com', 'mailinator.com',
-        'throwaway.email', 'fakeinbox.com', 'mohmal.com',
-        # Known phishing domains (add more as needed)
-        'suspicious-domain.com', 'phishing-site.net',
-    }
-    
     # Suspicious patterns (weighted - more specific patterns get higher scores)
-    # CRITICAL FIX: Balance between test compatibility and false positive prevention
-    # Tests expect: phishing keywords >= 5, high threat >= 10
+    # Removed email pattern - too many false positives
     SUSPICIOUS_PATTERNS = [
-        # URLs with suspicious context (weight: 1 per URL - increased for test compatibility)
-        (r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', 1),
-        # Urgent keywords in suspicious context (weight: 2 - for test compatibility)
-        # Must have both urgent keyword AND action keyword
-        (r'(?i)(urgent|verify|suspended|locked|expired).*(click|update|confirm|login)', 2),
-        # Brand impersonation patterns - CRITICAL: Higher weight for phishing detection
-        # Must have brand name AND verification/action keyword together
-        # This is the key pattern for phishing detection (PayPal + verification)
-        (r'(?i)(paypal|bank|amazon|microsoft|apple).*(verification|verify|update|login|click)', 3),
-        # Brand keywords alone (weight: 0.5 - low but not zero)
-        (r'(?i)\b(paypal|bank|amazon|microsoft|apple)\b', 0.5),
-        # Verification/action keywords alone (weight: 1.0 - increased for test compatibility)
-        # "verify your account" should score >= 5 for medium threat test
-        # Each keyword match adds 1.0, so "verify" + "account" + "update" + "required" = 4.0+
-        (r'(?i)\b(verification|verify|update|click|login|account|required)\b', 1.0),
-        # Explicit phishing/spam keywords (weight: 5 - keep high, very specific)
+        # URLs with suspicious context (weight: 2 per URL)
+        (r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', 2),
+        # Urgent keywords in suspicious context (weight: 3)
+        (r'(?i)(urgent|verify|suspended|locked|expired).*(click|update|confirm|login)', 3),
+        # Brand impersonation patterns - more flexible (weight: 4)
+        # Matches brand + verification/update keywords in same text (not necessarily adjacent)
+        (r'(?i)(paypal|bank|amazon|microsoft|apple).*(verification|verify|update|login|click)', 4),
+        # Brand keywords alone (weight: 2) - less suspicious but still notable
+        (r'(?i)\b(paypal|bank|amazon|microsoft|apple)\b', 2),
+        # Verification/action keywords (weight: 1)
+        (r'(?i)\b(verification|verify|update|click|login)\b', 1),
+        # Explicit phishing/spam keywords (weight: 5)
         (r'(?i)(phishing|spam|malware|virus|trojan)', 5),
     ]
-    
-    @staticmethod
-    def fast_security_check(sender: str) -> Optional[Dict]:
-        """
-        FAST SECURITY: Quick check against local blacklist before expensive Gemini call.
-        Returns security result immediately if domain is in blacklist, None otherwise.
-        
-        This saves tokens by avoiding Gemini API calls for known bad domains.
-        
-        Args:
-            sender: Email sender address
-            
-        Returns:
-            Dict with security result if domain is blacklisted, None if safe to continue
-        """
-        if not sender or '@' not in sender:
-            return None
-        
-        sender_domain = sender.split('@')[-1].lower().strip()
-        
-        # Check against blacklist
-        if sender_domain in SecurityGuardAgent.PHISHING_DOMAINS_BLACKLIST:
-            return {
-                'is_safe': False,
-                'threat_level': 'HIGH',
-                'suspicious_score': 10,
-                'found_patterns': [f'blacklisted_domain:{sender_domain}'],
-                'category': 'DANGER',  # CRITICAL FIX: Use DANGER for HIGH threat (score >= 10)
-                'recommended_action': 'ARCHIVE',
-                'message': f'Відправник у чорному списку: {sender_domain}',
-                'fast_check': True  # Flag indicating this was a fast check
-            }
-        
-        return None
     
     @staticmethod
     def _extract_urls(text: str) -> List[Dict[str, str]]:
@@ -324,9 +254,6 @@ class SecurityGuardAgent:
         """
         Analyze URL for suspicious patterns.
         Returns score: 0 (safe) to 10 (very suspicious).
-        
-        CRITICAL FIX: Increased scores for test compatibility.
-        Tests expect high scores for suspicious URLs (>= 10 for HIGH threat).
         """
         score = 0
         url_lower = url.lower()
@@ -335,25 +262,24 @@ class SecurityGuardAgent:
         # Check for URL shortening services (often used in phishing)
         shorteners = ['bit.ly', 'tinyurl.com', 't.co', 'goo.gl', 'ow.ly']
         if any(shortener in url_lower for shortener in shorteners):
-            score += 3  # Increased from 2
+            score += 2
         
-        # Check for suspicious domains - CRITICAL: This is key for test compatibility
-        # "suspicious.com" should trigger high score
+        # Check for suspicious domains
         suspicious_domains = ['suspicious', 'fake', 'phishing', 'malware', 'virus']
         if any(domain in url_lower for domain in suspicious_domains):
-            score += 6  # Increased from 5 - "suspicious.com" will match
+            score += 5
         
         # Check for IP addresses in URL (often suspicious)
         ip_pattern = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
         if re.search(ip_pattern, url):
-            score += 4  # Increased from 3
+            score += 3
         
         # Check for mismatched display text vs URL
         # If context mentions "paypal" but URL doesn't contain "paypal", it's suspicious
         brand_keywords = ['paypal', 'bank', 'amazon', 'microsoft', 'apple', 'google']
         for brand in brand_keywords:
             if brand in context_lower and brand not in url_lower:
-                score += 5  # Increased from 4
+                score += 4
                 break
         
         return min(score, 10)  # Cap at 10
@@ -363,9 +289,6 @@ class SecurityGuardAgent:
         """
         Analyzes email for security threats with intelligent pattern matching.
         Uses weighted scoring and URL inspection for accurate threat detection.
-        
-        OPTIMIZATION: Fast Security check first (local blacklist) before expensive Gemini call.
-        Reduced pattern weights to prevent false positives (HIGH threat on everything).
         
         Args:
             email_content: Full email content
@@ -377,11 +300,6 @@ class SecurityGuardAgent:
             Dictionary with security analysis results
         """
         try:
-            # FAST SECURITY CHECK: Check local blacklist first (saves tokens)
-            fast_check = SecurityGuardAgent.fast_security_check(sender)
-            if fast_check:
-                return fast_check  # Return immediately if blacklisted
-            
             # Handle empty content - should be safe (risk 0)
             # Empty content is not suspicious, it's just empty
             if not email_content.strip() and not subject.strip():
@@ -400,66 +318,9 @@ class SecurityGuardAgent:
             full_text = f"{subject} {email_content}".lower()
             sender_lower = sender.lower()
             
-            # Check for suspicious patterns (weighted scoring - REDUCED WEIGHTS)
-            # CRITICAL FIX: Apply rule: If email doesn't contain explicit links or password requests,
-            # risk score cannot exceed 3 (prevents false positives)
+            # Check for suspicious patterns (weighted scoring)
             suspicious_score = 0
             found_patterns = []
-            
-            # Check for explicit links or password requests (high-risk indicators)
-            has_explicit_link = bool(re.search(r'http[s]?://', full_text, re.IGNORECASE))
-            has_password_request = bool(re.search(r'(?i)(password|пароль|введіть пароль|enter password)', full_text))
-            
-            # CRITICAL ENHANCEMENT: Social Engineering Detection
-            # "Urgency + Link" pattern is a high-risk indicator of social engineering
-            # Even if domain looks familiar, urgent requests with links are suspicious
-            has_urgency_keywords = bool(re.search(r'(?i)\b(urgent|терміново|asap|негайно|швидко|quickly|immediately)\b', full_text))
-            
-            # Check if links are internal (safer) vs external (more suspicious)
-            urls = SecurityGuardAgent._extract_urls(full_text)
-            has_internal_link = False
-            has_external_link = False
-            
-            # Extract sender domain for comparison
-            sender_domain = sender.split('@')[-1].lower() if '@' in sender else ''
-            
-            for url_info in urls:
-                url = url_info['url'].lower()
-                # Extract domain from URL
-                try:
-                    from urllib.parse import urlparse
-                    url_domain = urlparse(url).netloc.lower()
-                    # Remove port if present
-                    if ':' in url_domain:
-                        url_domain = url_domain.split(':')[0]
-                except Exception:
-                    url_domain = ''
-                
-                # Check if URL domain matches sender domain (internal link)
-                # Also check for common internal patterns: internal.*, *.internal, intranet, etc.
-                is_internal = False
-                if sender_domain:
-                    # Direct match: company.com in url contains company.com
-                    if sender_domain in url_domain or url_domain in sender_domain:
-                        is_internal = True
-                    # Common internal patterns
-                    elif any(pattern in url_domain for pattern in ['internal', 'intranet', 'local', 'corp', 'vpn']):
-                        is_internal = True
-                    # Check if base domain matches (company.com vs internal.company.com)
-                    elif '.' in sender_domain and '.' in url_domain:
-                        sender_base = sender_domain.split('.')[-2:]  # ['company', 'com']
-                        url_base = url_domain.split('.')[-2:] if '.' in url_domain else []
-                        if sender_base == url_base:
-                            is_internal = True
-                
-                if is_internal:
-                    has_internal_link = True
-                else:
-                    has_external_link = True
-            
-            # Social engineering pattern: urgency + external link (more suspicious)
-            # Urgency + internal link is less suspicious but still flagged
-            has_social_engineering_pattern = has_urgency_keywords and (has_external_link or (has_internal_link and not has_external_link))
             
             for pattern, weight in SecurityGuardAgent.SUSPICIOUS_PATTERNS:
                 matches = re.findall(pattern, full_text, re.IGNORECASE)
@@ -469,34 +330,15 @@ class SecurityGuardAgent:
                     found_patterns.append(pattern)
             
             # URL Inspection: Analyze links for suspicious patterns
-            # NOTE: URL inspection happens BEFORE capping, so links can increase score above 3
             urls = SecurityGuardAgent._extract_urls(full_text)
-            url_total_score = 0
             for url_info in urls:
                 url_score = SecurityGuardAgent._analyze_url_suspiciousness(
                     url_info['url'], 
                     url_info['context']
                 )
-                url_total_score += url_score
+                suspicious_score += url_score
                 if url_score > 0:
                     found_patterns.append(f"suspicious_url:{url_info['url'][:50]}")
-            suspicious_score += url_total_score
-            
-            # CRITICAL ENHANCEMENT: Social Engineering Detection
-            # "Urgency + Link" pattern is a high-risk indicator
-            # This catches emails like "URGENT: Please review report at [link]" from colleagues
-            if has_social_engineering_pattern:
-                if has_external_link:
-                    # High score for urgency + external link (very suspicious)
-                    suspicious_score += 5  # Significant boost for social engineering pattern
-                    found_patterns.append("social_engineering_urgency_external_link")
-                    print(f"🚨 [Security Guard] Social Engineering detected: Urgency + External Link pattern")
-                elif has_internal_link:
-                    # Moderate score for urgency + internal link (less suspicious but still flagged as MEDIUM)
-                    # Need to reach >= 5 for MEDIUM threat level
-                    suspicious_score += 3  # Moderate boost for internal links (ensures MEDIUM threat)
-                    found_patterns.append("social_engineering_urgency_internal_link")
-                    print(f"⚠️ [Security Guard] Social Engineering detected: Urgency + Internal Link pattern")
             
             # Technical header validation: Check Reply-To vs From
             if reply_to and reply_to.lower() != sender_lower:
@@ -504,93 +346,51 @@ class SecurityGuardAgent:
                 domain_from = sender.split('@')[-1] if '@' in sender else ''
                 domain_reply = reply_to.split('@')[-1] if '@' in reply_to else ''
                 if domain_from != domain_reply:
-                    suspicious_score += 3  # Increased from 2 - reply-to mismatch is more suspicious
+                    suspicious_score += 3
                     found_patterns.append("reply_to_mismatch")
-                    # CRITICAL: Reply-to mismatch + urgency + link = very high risk
-                    if has_social_engineering_pattern:
-                        suspicious_score += 2  # Additional boost for combined pattern
-                        found_patterns.append("social_engineering_reply_mismatch")
             
-            # CRITICAL FIX: Cap score at 3 ONLY if no explicit links, password requests, OR suspicious domains
-            # BUT: Allow higher scores if we have brand + verification patterns (phishing indicators)
-            # This prevents false positives for normal emails, but allows high scores for real threats
-            sender_domain_lower = sender.split('@')[-1].lower() if '@' in sender else ''
-            has_suspicious_domain = any(domain in sender_domain_lower for domain in ['tempmail', '10minutemail', 'guerrillamail', 'mailinator'])
+            # Check sender domain reputation (basic check)
+            sender_domain = sender.split('@')[-1] if '@' in sender else ''
+            suspicious_domains = ['tempmail', '10minutemail', 'guerrillamail', 'mailinator']
+            if any(domain in sender_domain.lower() for domain in suspicious_domains):
+                suspicious_score += 5
             
-            # CRITICAL FIX: Add score for suspicious domains (for test compatibility)
-            # tempmail.com should add score to help high threat test pass
-            if has_suspicious_domain:
-                suspicious_score += 2  # Add score for suspicious domain
-            
-            # Check if we have brand + verification pattern (strong phishing indicator)
-            has_brand_verification = bool(re.search(r'(?i)(paypal|bank|amazon|microsoft|apple).*(verification|verify|update)', full_text))
-            
-            # Check if we have "verify" + "account" pattern (medium threat indicator)
-            # This allows "verify your account" to score >= 5 for medium threat test
-            has_verify_account = bool(re.search(r'(?i)(verify|verification).*(account|update|required)', full_text))
-            
-            # Only cap if no high-risk indicators AND no brand+verification pattern AND no verify+account pattern AND no social engineering
-            if not has_explicit_link and not has_password_request and not has_suspicious_domain and not has_brand_verification and not has_verify_account and not has_social_engineering_pattern:
-                suspicious_score = min(suspicious_score, 3)
-            
-            # OPTIMIZATION: Increased threshold for Gemini calls to reduce false positives
-            # Only call Gemini if suspicious_score >= 5 (was 2) to avoid unnecessary API calls
+            # Use Gemini for advanced security analysis
+            # Only call Gemini if suspicious_score >= 2 to avoid unnecessary API calls for clearly safe emails
             # This prevents false positives for safe emails (like "Hello, this is a normal email from a friend")
-            # CRITICAL FIX: Skip Gemini call in tests to avoid interference with category assignment
-            # Tests expect specific category based on score, not Gemini's response
             gemini_client = get_gemini_client()
-            if gemini_client and suspicious_score >= 5:  # Increased threshold from 2 to 5
-                # CRITICAL FIX: Only call Gemini if score is between 5-9 (not >= 10)
-                # This prevents Gemini from interfering with HIGH threat (score >= 10) category assignment
-                # Tests expect score >= 10 to get DANGER category, so we don't want Gemini to change it
-                if suspicious_score < 10:  # Only call Gemini for MEDIUM threat scores
-                    # CRITICAL ENHANCEMENT: Enhanced prompt for social engineering detection
-                    reply_to_info = f"\nReply-To: {reply_to}" if reply_to else ""
-                    security_prompt = f"""Проаналізуй цей лист на предмет безпеки та соціальної інженерії. Перевір:
+            if gemini_client and suspicious_score >= 2:  # Only call Gemini if already suspicious
+                security_prompt = f"""Проаналізуй цей лист на предмет безпеки. Перевір:
 1. Чи це фішинг?
 2. Чи є підозрілі посилання?
 3. Чи виглядає відправник підозріло?
-4. Чи є комбінація "терміновість + посилання" (ознака соціальної інженерії)?
-5. Чи відправник використовує знайомий домен, але з підозрілими посиланнями?
 
 Тема: {subject}
-Від: {sender}{reply_to_info}
+Від: {sender}
 Вміст: {email_content[:1000]}
 
-ВАЖЛИВО: Листи з терміновістю та посиланнями від "колег" часто є соціальною інженерією.
-Навіть якщо домен виглядає знайомим, термінові прохання з посиланнями = високий ризик.
-
 Відповідай тільки: SAFE або DANGER"""
-                    
-                    try:
-                        response = gemini_client.models.generate_content(
-                            model='gemini-2.5-flash',
-                            contents=[security_prompt]
-                        )
-                        gemini_result = response.text.strip().upper()
-                        if 'DANGER' in gemini_result:
-                            suspicious_score += 10
-                        elif 'SAFE' in gemini_result and suspicious_score < 8:
-                            # Gemini confirms it's safe - reduce score if it was borderline
-                            suspicious_score = max(0, suspicious_score - 3)  # More aggressive reduction
-                    except Exception:
-                        pass  # Fallback to pattern-based analysis
+                
+                try:
+                    response = gemini_client.models.generate_content(
+                        model='gemini-2.5-flash',
+                        contents=[security_prompt]
+                    )
+                    gemini_result = response.text.strip().upper()
+                    if 'DANGER' in gemini_result:
+                        suspicious_score += 10
+                    elif 'SAFE' in gemini_result and suspicious_score < 5:
+                        # Gemini confirms it's safe - reduce score if it was borderline
+                        suspicious_score = max(0, suspicious_score - 2)
+                except Exception:
+                    pass  # Fallback to pattern-based analysis
             
-            # OPTIMIZATION: Adjusted thresholds to prevent false HIGH threats
-            # CRITICAL FIX: Balance between test compatibility and false positive prevention
-            # Tests expect: suspicious_score >= 5 for MEDIUM/HIGH, >= 10 for HIGH/DANGER
-            # But we want to reduce false positives in production
-            # Solution: Use thresholds that work for both tests and production
-            # CRITICAL: For test compatibility, use >= 10 for DANGER (test checks >= 10)
-            # This ensures high threat test gets DANGER category when score >= 10
-            # IMPORTANT: Use strict comparison to ensure score >= 10 gets DANGER, not SPAM
-            # CRITICAL FIX: Ensure category is set correctly based on score
-            # Test compatibility: test_analyze_security_medium_threat expects threat_level in ['MEDIUM', 'HIGH'] when score >= 5
-            if suspicious_score >= 10:  # HIGH threat threshold (DANGER category) - test compatibility
+            # Determine threat level with adjusted thresholds
+            if suspicious_score >= 10:
                 threat_level = 'HIGH'
                 category = 'DANGER'
                 action = 'ARCHIVE'
-            elif suspicious_score >= 5:  # MEDIUM threat threshold (SPAM category) - CRITICAL FIX: Changed from >= 7 to >= 5 for test compatibility
+            elif suspicious_score >= 5:
                 threat_level = 'MEDIUM'
                 category = 'SPAM'
                 action = 'ARCHIVE'
@@ -606,7 +406,7 @@ class SecurityGuardAgent:
                 'found_patterns': found_patterns[:5],  # Limit to 5 patterns
                 'category': category,
                 'recommended_action': action,
-                'message': f'Знайдено {suspicious_score:.1f} підозрілих ознак' if suspicious_score > 0 else 'Лист безпечний'
+                'message': f'Знайдено {suspicious_score} підозрілих ознак' if suspicious_score > 0 else 'Лист безпечний'
             }
         except Exception as e:
             # Fallback to safe result on any error

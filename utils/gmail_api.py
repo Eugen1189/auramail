@@ -333,7 +333,7 @@ def process_message_action(service, msg_id, classification_data, label_cache):
             }
             service.users().messages().modify(userId='me', id=msg_id, body=modification).execute()
             return f"MOVED to {label_name}"
-        
+            
         elif action == "NO_ACTION":
             # Only add processed label, keep in INBOX
             modification = {

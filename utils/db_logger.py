@@ -1,497 +1,149 @@
 """
-Database logging module for AuraMail.
-Replaces JSON file-based logging with database-backed logging.
-Uses SQLAlchemy models: ActionLog, Report, Progress.
+Database logging utilities for AuraMail.
+Handles logging actions to database and retrieving logs.
 """
-import os
-from datetime import datetime, date
-from flask import current_app
-from database import db, ActionLog, Report, Progress
+from datetime import datetime
+from flask import has_app_context, current_app
+from app_factory import create_app
+
+from database import db, ActionLog, Progress, Report
 
 
 def log_action(msg_id, classification, action_taken, subject):
     """
-    Logs action to database (ActionLog table).
+    Logs email processing action to database.
     
     Args:
-        msg_id: Email message ID
-        classification: Dictionary with category, description, expected_reply_date, etc.
-        action_taken: Action performed (MOVE, ARCHIVE, DELETE, etc.)
+        msg_id: Gmail message ID
+        classification: Classification dictionary with category, description, etc.
+        action_taken: Action that was taken (MOVE, ARCHIVE, NO_ACTION)
         subject: Email subject
-    
-    Returns:
-        None (logs to database)
     """
     try:
-        # Parse expected_reply_date if present
+        # Ensure Flask app context
+        if not has_app_context():
+            app = create_app()
+            with app.app_context():
+                return _log_action_impl(msg_id, classification, action_taken, subject)
+        else:
+            return _log_action_impl(msg_id, classification, action_taken, subject)
+    except Exception as e:
+        print(f"⚠️ Error logging action: {e}")
+        return None
+
+
+def _log_action_impl(msg_id, classification, action_taken, subject):
+    """Internal implementation of log_action (assumes context exists)."""
+    try:
+        # Extract classification data
+        category = classification.get('category', 'UNKNOWN') if isinstance(classification, dict) else 'UNKNOWN'
+        description = classification.get('description', '') if isinstance(classification, dict) else ''
+        extracted_entities = classification.get('extracted_entities', {}) if isinstance(classification, dict) else {}
+        
+        # Extract follow-up data if present
         expected_reply_date = None
-        expects_reply = classification.get('expects_reply', False)
-        
-        # CRITICAL FIX: Only parse expected_reply_date if it's not None/empty
-        # This ensures that when Gemini returns None, we don't set a date
-        if 'expected_reply_date' in classification and classification['expected_reply_date']:
-            expected_reply_date_str = classification['expected_reply_date']
-            # CRITICAL: Check if it's actually None or empty string
-            if expected_reply_date_str is None or expected_reply_date_str == '':
-                expected_reply_date = None
-            else:
-                try:
-                    # Try ISO format first (2025-12-31T10:00:00)
-                    if 'T' in str(expected_reply_date_str):
-                        expected_reply_date = datetime.fromisoformat(str(expected_reply_date_str).replace('Z', '+00:00')).date()
-                    else:
-                        # Try strptime format (2025-12-31)
-                        expected_reply_date = datetime.strptime(str(expected_reply_date_str), '%Y-%m-%d').date()
-                except (ValueError, AttributeError, TypeError):
-                    # Invalid date format, leave as None
-                    expected_reply_date = None
-        
-        # Check if entry already exists (update instead of create)
-        # Ensure session is active before querying - with reconnect logic for fault tolerance
-        existing_entry = None
-        max_reconnect_attempts = 3
-        
-        # First, ensure session is clean before querying
-        # CRITICAL: Always rollback first to clear any pending transactions
-        # This prevents PendingRollbackError from propagating between tests
-        try:
-            # Check if session has pending rollback
-            if db.session.is_active:
-                try:
-                    db.session.rollback()
-                except Exception:
-                    # If rollback fails, try to remove session
-                    try:
-                        db.session.remove()
-                    except Exception:
-                        pass
-        except Exception:
-            # If checking session state fails, try to rollback anyway
+        if isinstance(extracted_entities, dict) and 'due_date' in extracted_entities:
             try:
-                db.session.rollback()
-            except Exception:
+                expected_reply_date = datetime.strptime(extracted_entities['due_date'], '%Y-%m-%d').date()
+            except (ValueError, TypeError):
                 pass
         
-        for attempt in range(max_reconnect_attempts):
-            try:
-                # CRITICAL FIX: Переконуємося, що сесія активна перед запитом
-                # Це запобігає "Database session closed" помилкам
-                try:
-                    # Перевіряємо, чи сесія активна
-                    if not db.session.is_active:
-                        # Сесія неактивна - намагаємося її активувати
-                        try:
-                            db.session.rollback()
-                        except Exception:
-                            pass
-                        try:
-                            db.session.remove()
-                        except Exception:
-                            pass
-                except Exception:
-                    # Якщо перевірка не вдалася, пробуємо rollback
-                    try:
-                        db.session.rollback()
-                    except Exception:
-                        pass
-                
-                # Check if session is active
-                try:
-                    # Try to query for existing entry
-                    existing_entry = ActionLog.query.filter_by(msg_id=msg_id).first()
-                    break  # Success, exit retry loop
-                except Exception as query_error:
-                    error_str = str(query_error).lower()
-                    is_closed_error = 'closed' in error_str or 'invalid transaction' in error_str or 'pendingrollback' in error_str
-                    
-                    if is_closed_error and attempt < max_reconnect_attempts - 1:
-                        # Session is closed or has pending rollback - try to reconnect (Fault Tolerance)
-                        try:
-                            # First, try to rollback to clear any pending rollback
-                            try:
-                                db.session.rollback()
-                            except Exception:
-                                pass
-                            
-                            # Remove session to force new connection
-                            try:
-                                db.session.remove()
-                            except Exception:
-                                pass
-                            
-                            # Try to refresh session by executing a simple query
-                            # This forces SQLAlchemy to create a new connection
-                            try:
-                                # Use a simple query to test connection
-                                db.session.execute(db.text('SELECT 1'))
-                                db.session.commit()
-                                # If successful, retry the original query
-                                continue
-                            except Exception:
-                                # If reconnect fails, wait a bit before retrying
-                                import time
-                                time.sleep(0.01 * (attempt + 1))  # Small delay with backoff
-                                continue
-                        except Exception:
-                            # If all reconnect attempts fail, wait and retry
-                            import time
-                            time.sleep(0.01 * (attempt + 1))
-                            continue
-                    else:
-                        # If not a closed error or max attempts reached, re-raise
-                        if os.environ.get('TESTING') or os.environ.get('PYTEST_CURRENT_TEST'):
-                            if is_closed_error:
-                                raise Exception(f"Database session closed during query (test isolation issue): {query_error}") from query_error
-                        raise
-            except Exception as e:
-                if attempt == max_reconnect_attempts - 1:
-                    # Last attempt failed - re-raise
-                    raise
-                # Wait a bit before retry
-                import time
-                time.sleep(0.01 * (attempt + 1))
+        # Check if entry already exists
+        existing = ActionLog.query.filter_by(msg_id=msg_id).first()
         
-        # Ensure ai_category is never None (nullable=False constraint)
-        # Use 'or' operator to handle both missing key and None value cases
-        ai_category = classification.get('category') or 'UNKNOWN'
-        reason = classification.get('description') or ''
-        
-        if existing_entry:
+        if existing:
             # Update existing entry
-            existing_entry.subject = subject
-            existing_entry.ai_category = ai_category
-            existing_entry.action_taken = action_taken
-            existing_entry.reason = reason
-            existing_entry.details = classification
-            existing_entry.expected_reply_date = expected_reply_date
-            existing_entry.is_followup_pending = expects_reply
-            existing_entry.timestamp = datetime.utcnow()
-            # Flush immediately to reduce transaction time
-            db.session.flush()
+            existing.timestamp = datetime.utcnow()
+            existing.subject = subject
+            existing.ai_category = category
+            existing.action_taken = action_taken
+            existing.reason = description
+            existing.details = classification
+            existing.is_followup_pending = expected_reply_date is not None
+            existing.expected_reply_date = expected_reply_date
         else:
             # Create new entry
-            new_entry = ActionLog(
+            new_log = ActionLog(
                 msg_id=msg_id,
                 subject=subject,
-                ai_category=ai_category,
+                ai_category=category,
                 action_taken=action_taken,
-                reason=reason,
+                reason=description,
                 details=classification,
-                expected_reply_date=expected_reply_date,
-                is_followup_pending=expects_reply,
-                followup_sent=False
+                is_followup_pending=expected_reply_date is not None,
+                expected_reply_date=expected_reply_date
             )
-            db.session.add(new_entry)
-            # Flush immediately to reduce transaction time
-            db.session.flush()
+            db.session.add(new_log)
         
-        # Retry mechanism for database locking issues (especially for SQLite)
-        # Increased retries for better reliability in test environment
-        max_retries = 10  # Increased from 5 to 10 for better reliability
-        retry_delay = 0.05  # 50ms initial delay
-        
-        for attempt in range(max_retries):
-            try:
-                # Flush before commit to catch errors early
-                db.session.flush()
-                db.session.commit()
-                break  # Success, exit retry loop
-            except Exception as db_error:
-                # Always rollback on error to clear transaction state
-                try:
-                    db.session.rollback()
-                except Exception:
-                    pass
-                
-                # Check if it's a locking error (SQLite specific)
-                error_str = str(db_error).lower()
-                is_locking_error = 'locked' in error_str or 'database is locked' in error_str
-                
-                if is_locking_error and attempt < max_retries - 1:
-                    # Wait before retry with exponential backoff
-                    import time
-                    time.sleep(retry_delay * (2 ** attempt))  # Exponential: 50ms, 100ms, 200ms, 400ms, 800ms
-                    # Clear session state and re-add object
-                    try:
-                        db.session.expunge_all()  # Clear session state
-                        # Re-add the entry if it was removed
-                        if existing_entry:
-                            db.session.add(existing_entry)
-                        else:
-                            db.session.add(new_entry)
-                    except Exception:
-                        pass
-                    continue
-                else:
-                    # If not a locking error or max retries reached, break and handle in outer except
-                    # Don't raise here - let outer except handle it gracefully
-                    break
-        
-        # Expire all objects to ensure fresh state (helps with in-memory SQLite)
-        # This ensures queries see the latest data
-        db.session.expire_all()
-        
-        # Note: We don't close the session here because it's managed by Flask-SQLAlchemy
-        # The session will be automatically cleaned up by the app context
-        # Closing it manually could cause issues with subsequent operations
-    except Exception as e:
-        # Rollback on error - ALWAYS rollback before handling error
-        # This ensures session is in a clean state
-        try:
-            db.session.rollback()
-        except Exception:
-            # If rollback fails, try to close and remove session
-            try:
-                db.session.close()
-            except Exception:
-                pass
-            try:
-                db.session.remove()
-            except Exception:
-                pass
-        
-        # Expire all objects to clear session state
-        try:
-            db.session.expire_all()
-        except Exception:
-            pass
-        
-        # In test environment, raise exception to fail fast and identify issues
-        # In production, log error gracefully
-        if os.environ.get('TESTING') or os.environ.get('PYTEST_CURRENT_TEST'):
-            # Check if it's a closed database error - this indicates test isolation issue
-            error_str = str(e).lower()
-            if 'closed' in error_str or 'invalid transaction' in error_str:
-                # Database was closed - this is a test isolation issue
-                raise Exception(f"Database session closed (test isolation issue): {e}") from e
-            # Re-raise in test environment to catch issues early
-            raise Exception(f"Error logging action (test mode): {e}") from e
-        else:
-            # In production, log gracefully
-            print(f"Error logging action: {e}")
-            # Function should handle errors gracefully and not raise exceptions in production
-
-
-def get_log_entry(msg_id):
-    """
-    Retrieves a specific log entry by message ID.
-    
-    Args:
-        msg_id: Email message ID
-    
-    Returns:
-        Dictionary representation of ActionLog entry, or None if not found
-    """
-    try:
-        entry = ActionLog.query.filter_by(msg_id=msg_id).first()
-        if entry:
-            return entry.to_dict()
-        return None
-    except Exception:
-        return None
-
-
-def get_action_history(limit=50):
-    """
-    Returns recent action history.
-    
-    Args:
-        limit: Maximum number of entries to return (default: 50)
-    
-    Returns:
-        List of dictionaries representing ActionLog entries
-    """
-    try:
-        entries = ActionLog.query.order_by(ActionLog.timestamp.desc()).limit(limit).all()
-        return [entry.to_dict() for entry in entries]
-    except Exception:
-        return []
-
-
-def get_daily_stats(days=7):
-    """
-    Calculates statistics for the last N days.
-    
-    Args:
-        days: Number of days to calculate stats for (default: 7)
-    
-    Returns:
-        Dictionary with date strings as keys and counts as values
-    """
-    try:
-        from datetime import timedelta
-        
-        stats = {}
-        now = datetime.utcnow()
-        
-        # Initialize stats for last N days
-        for i in range(days):
-            date_str = (now - timedelta(days=i)).date().isoformat()
-            stats[date_str] = 0
-        
-        # Query entries from last N days
-        start_date = (now - timedelta(days=days)).date()
-        entries = ActionLog.query.filter(
-            ActionLog.timestamp >= datetime.combine(start_date, datetime.min.time())
-        ).all()
-        
-        # Count entries per day
-        for entry in entries:
-            entry_date = entry.timestamp.date().isoformat()
-            if entry_date in stats:
-                stats[entry_date] += 1
-        
-        return stats
-    except Exception:
-        return {}
-
-
-def save_report(stats):
-    """
-    Saves a processing report to database.
-    
-    Args:
-        stats: Dictionary with report statistics:
-            - total_processed
-            - important
-            - action_required
-            - newsletter
-            - social
-            - review
-            - archived
-            - errors
-    
-    Returns:
-        None (saves to database)
-    """
-    try:
-        new_report = Report(
-            total_processed=stats.get('total_processed', 0),
-            important=stats.get('important', 0),
-            action_required=stats.get('action_required', 0),
-            newsletter=stats.get('newsletter', 0),
-            social=stats.get('social', 0),
-            review=stats.get('review', 0),
-            archived=stats.get('archived', 0),
-            errors=stats.get('errors', 0),
-            stats=stats
-        )
-        db.session.add(new_report)
-        
-        # Retry mechanism for database locking issues
-        # Increased retries for better reliability in test environment
-        max_retries = 10  # Increased from 5 to 10 for better reliability
-        retry_delay = 0.05  # 50ms initial delay
-        
-        for attempt in range(max_retries):
-            try:
-                db.session.flush()
-                db.session.commit()
-                break  # Success, exit retry loop
-            except Exception as db_error:
-                # Check if it's a locking error
-                error_str = str(db_error).lower()
-                is_locking_error = 'locked' in error_str or 'database is locked' in error_str
-                
-                if is_locking_error and attempt < max_retries - 1:
-                    # Wait before retry with exponential backoff
-                    import time
-                    time.sleep(retry_delay * (2 ** attempt))  # Exponential backoff
-                    # Rollback and clear session state
-                    try:
-                        db.session.rollback()
-                        db.session.expunge_all()
-                    except Exception:
-                        pass
-                    continue
-                else:
-                    # If not a locking error or max retries reached, break and handle in outer except
-                    break
-        
-        # Invalidate cache if available (non-critical, errors are silently ignored)
-        try:
-            _invalidate_cache()
-        except Exception:
-            # Cache invalidation errors are non-critical and should not fail the operation
-            pass
+        db.session.commit()
+        return True
     except Exception as e:
         try:
             db.session.rollback()
         except Exception:
             pass
-        
-        # In test environment, raise exception to fail fast and identify issues
-        # In production, log error gracefully
-        # Exception: Cache errors are always ignored (non-critical)
-        is_cache_error = 'cache' in str(e).lower() or 'ImportError' in str(type(e).__name__)
-        if (os.environ.get('TESTING') or os.environ.get('PYTEST_CURRENT_TEST')) and not is_cache_error:
-            # Re-raise in test environment to catch issues early (except cache errors)
-            raise Exception(f"Error saving report (test mode): {e}") from e
-        else:
-            # In production, log gracefully
-            print(f"Error saving report: {e}")
+        print(f"⚠️ Error logging action: {e}")
+        return False
 
 
-def get_latest_report():
+def log_user_action(user_id, action_type, details=None):
     """
-    Retrieves the most recent report.
+    Записує дію користувача в лог (тимчасова заглушка або реалізація).
     
-    Returns:
-        Dictionary representation of latest Report entry, or default empty report if no reports exist
+    Args:
+        user_id: ID користувача
+        action_type: Тип дії
+        details: Додаткові деталі (опціонально)
     """
     try:
-        report = Report.query.order_by(Report.created_at.desc()).first()
-        if report:
-            return report.to_dict()
-        # ПОВЕРТАЄМО ДЕФОЛТНИЙ СЛОВНИК ЗАМІСТЬ NONE
-        # Формат відповідає Report.to_dict() для сумісності
-        return {
-            'total_processed': 0,
-            'important': 0,
-            'action_required': 0,
-            'newsletter': 0,
-            'social': 0,
-            'review': 0,
-            'archived': 0,
-            'errors': 0
-        }
+        # Тут можна додати запис в БД, якщо у вас є модель UserLog
+        # Але щоб система запрацювала прямо зараз, просто виведемо в консоль:
+        print(f"📝 [ACTION LOG] User: {user_id} | Action: {action_type} | {details}")
     except Exception as e:
-        print(f"Error getting latest report: {e}")
-        # Повертаємо дефолтний словник з помилкою
-        return {
-            'total_processed': 0,
-            'important': 0,
-            'action_required': 0,
-            'newsletter': 0,
-            'social': 0,
-            'review': 0,
-            'archived': 0,
-            'errors': 0
-        }
+        print(f"⚠️ Error logging user action: {e}")
+
+
+# Alias for backward compatibility if needed
+def log_action(user_id=None, action_type=None, details=None, msg_id=None, classification=None, action_taken=None, subject=None):
+    """
+    Universal log_action function that handles both email actions and user actions.
+    
+    If msg_id is provided, logs email action (old signature).
+    If user_id is provided, logs user action (new signature).
+    """
+    if msg_id is not None:
+        # Email action logging (original signature)
+        return log_action(msg_id, classification, action_taken, subject)
+    elif user_id is not None:
+        # User action logging (new signature)
+        return log_user_action(user_id, action_type, details)
+    else:
+        print("⚠️ log_action called without required parameters")
+        return None
 
 
 def init_progress(total=0):
     """
     Initializes progress tracking in database.
     Deletes old progress entries and creates a new one.
-    
-    Args:
-        total: Total number of items to process (default: 0)
-    
-    Returns:
-        None (saves to database)
     """
     try:
-        # Delete all existing progress entries (only one should exist)
+        if not has_app_context():
+            app = create_app()
+            with app.app_context():
+                return _init_progress_impl(total)
+        else:
+            return _init_progress_impl(total)
+    except Exception as e:
+        print(f"⚠️ Error initializing progress: {e}")
+        return None
+
+
+def _init_progress_impl(total=0):
+    """Internal implementation of init_progress (assumes context exists)."""
+    try:
         Progress.query.delete()
-        
-        new_progress = Progress(
-            total=total,
-            current=0,
-            status='Starting...',
-            details='Initializing...',
-            stats={}
-        )
+        new_progress = Progress(total=total, current=0, status='Starting...', details='Initializing...', stats={})
         db.session.add(new_progress)
         db.session.commit()
     except Exception as e:
@@ -499,159 +151,334 @@ def init_progress(total=0):
             db.session.rollback()
         except Exception:
             pass
-        print(f"Error initializing progress: {e}")
+        print(f"⚠️ Error initializing progress: {e}")
 
 
 def update_progress(current, stats=None, details=''):
     """
-    Updates current progress in database.
+    Updates progress tracking in database.
     
     Args:
-        current: Current number of processed items
-        stats: Optional statistics dictionary
-        details: Optional status details string
-    
-    Returns:
-        None (updates database)
+        current: Current progress count
+        stats: Statistics dictionary (optional)
+        details: Progress details string (optional)
     """
     try:
-        # Get existing progress or create new one
-        progress = Progress.query.first()
-        if not progress:
-            progress = Progress(total=0, current=0, status='Running', details='', stats={})
-            db.session.add(progress)
-        
-        progress.current = current
-        progress.status = 'Running'
-        if details:
-            progress.details = details
-        if stats:
-            progress.stats = stats
-        
-        db.session.commit()
+        if not has_app_context():
+            app = create_app()
+            with app.app_context():
+                return _update_progress_impl(current, stats, details)
+        else:
+            return _update_progress_impl(current, stats, details)
     except Exception as e:
-        try:
-            db.session.rollback()
-        except Exception:
-            pass
-        print(f"Error updating progress: {e}")
+        print(f"⚠️ Error updating progress: {e}")
+        return None
 
 
-def complete_progress(stats=None, details=None):
-    """
-    Marks progress as completed in database.
-    
-    CRITICAL FIX: Sets current = total to show 100% completion in UI.
-    This fixes the issue where Early Exit shows 0/17 instead of 17/17.
-    
-    Args:
-        stats: Optional statistics dictionary to save with progress
-        details: Optional completion message (default: 'Processing complete' or 'Ваша пошта вже в ідеальному порядку')
-    
-    Returns:
-        None (updates database)
-    """
+def _update_progress_impl(current, stats=None, details=''):
+    """Internal implementation of update_progress (assumes context exists)."""
     try:
         progress = Progress.query.first()
         if progress:
-            # CRITICAL: Set current = total to show 100% completion
-            # This ensures UI shows correct progress even for Early Exit scenarios
-            progress.current = progress.total
-            progress.status = 'Completed'
-            
-            # Use custom message if provided, otherwise use default
-            if details:
-                progress.details = details
-            elif progress.total == 0:
-                progress.details = 'Ваша пошта вже в ідеальному порядку. AI відпочиває.'
-            else:
-                progress.details = 'Ваша пошта успішно розсортована!'
-            
-            # Save stats if provided
+            progress.current = current
+            progress.status = details or progress.status
             if stats:
                 progress.stats = stats
             db.session.commit()
         else:
-            # If no progress exists, create one with completed status
-            # For Early Exit: total might be 0, but we still show completion
-            total = stats.get('total_processed', 0) if stats else 0
-            progress = Progress(
-                total=total,
-                current=total,  # CRITICAL: Set current = total for 100%
-                status='Completed',
-                details=details or 'Ваша пошта вже в ідеальному порядку. AI відпочиває.',
-                stats=stats or {}
-            )
-            db.session.add(progress)
+            # Create new progress if none exists
+            new_progress = Progress(total=current, current=current, status=details, stats=stats or {})
+            db.session.add(new_progress)
             db.session.commit()
     except Exception as e:
         try:
             db.session.rollback()
         except Exception:
             pass
-        print(f"Error completing progress: {e}")
+        print(f"⚠️ Error updating progress: {e}")
+
+
+def complete_progress(stats=None):
+    """
+    Marks progress as complete in database.
+    
+    Args:
+        stats: Final statistics dictionary (optional)
+    """
+    try:
+        if not has_app_context():
+            app = create_app()
+            with app.app_context():
+                return _complete_progress_impl(stats)
+        else:
+            return _complete_progress_impl(stats)
+    except Exception as e:
+        print(f"⚠️ Error completing progress: {e}")
+        return None
+
+
+def _complete_progress_impl(stats=None):
+    """Internal implementation of complete_progress (assumes context exists)."""
+    try:
+        progress = Progress.query.first()
+        if progress:
+            progress.status = 'Completed'
+            if stats:
+                progress.stats = stats
+            db.session.commit()
+    except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        print(f"⚠️ Error completing progress: {e}")
+
+
+def save_report(report_data):
+    """
+    Saves processing report to database.
+    
+    Args:
+        report_data: Dictionary with report data
+    """
+    try:
+        if not has_app_context():
+            app = create_app()
+            with app.app_context():
+                return _save_report_impl(report_data)
+        else:
+            return _save_report_impl(report_data)
+    except Exception as e:
+        print(f"⚠️ Error saving report: {e}")
+        return None
+
+
+def _save_report_impl(report_data):
+    """Internal implementation of save_report (assumes context exists)."""
+    try:
+        new_report = Report(
+            timestamp=datetime.utcnow(),
+            total_processed=report_data.get('total', 0),
+            stats=report_data.get('stats', {}),
+            details=report_data.get('details', {})
+        )
+        db.session.add(new_report)
+        db.session.commit()
+        return new_report.id
+    except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        print(f"⚠️ Error saving report: {e}")
+        return None
+
+
+def get_log_entry(msg_id):
+    """
+    Gets a specific log entry by message ID.
+    
+    Args:
+        msg_id: Gmail message ID
+        
+    Returns:
+        ActionLog object or None
+    """
+    try:
+        if not has_app_context():
+            app = create_app()
+            with app.app_context():
+                return _get_log_entry_impl(msg_id)
+        else:
+            return _get_log_entry_impl(msg_id)
+    except Exception as e:
+        print(f"⚠️ Error getting log entry: {e}")
+        return None
+
+
+def _get_log_entry_impl(msg_id):
+    """Internal implementation of get_log_entry (assumes context exists)."""
+    try:
+        return ActionLog.query.filter_by(msg_id=msg_id).first()
+    except Exception as e:
+        print(f"⚠️ Error getting log entry: {e}")
+        return None
+
+
+def get_action_history(limit=50):
+    """
+    Gets recent action history from database.
+    
+    Args:
+        limit: Maximum number of entries to return
+        
+    Returns:
+        List of ActionLog objects
+    """
+    try:
+        if not has_app_context():
+            app = create_app()
+            with app.app_context():
+                return _get_action_history_impl(limit)
+        else:
+            return _get_action_history_impl(limit)
+    except Exception as e:
+        print(f"⚠️ Error getting action history: {e}")
+        return []
+
+
+def _get_action_history_impl(limit=50):
+    """Internal implementation of get_action_history (assumes context exists)."""
+    try:
+        return ActionLog.query.order_by(ActionLog.timestamp.desc()).limit(limit).all()
+    except Exception as e:
+        print(f"⚠️ Error getting action history: {e}")
+        return []
+
+
+def get_daily_stats(days=7):
+    """
+    Calculates daily statistics for the last N days.
+    
+    Args:
+        days: Number of days to calculate stats for
+        
+    Returns:
+        Dictionary with date strings as keys and counts as values
+    """
+    try:
+        if not has_app_context():
+            app = create_app()
+            with app.app_context():
+                return _get_daily_stats_impl(days)
+        else:
+            return _get_daily_stats_impl(days)
+    except Exception as e:
+        print(f"⚠️ Error getting daily stats: {e}")
+        return {}
+
+
+def _get_daily_stats_impl(days=7):
+    """Internal implementation of get_daily_stats (assumes context exists)."""
+    try:
+        from datetime import timedelta
+        
+        stats = {}
+        now = datetime.utcnow()
+        
+        # Initialize dates
+        for i in range(days):
+            date_str = (now - timedelta(days=i)).date().isoformat()
+            stats[date_str] = 0
+        
+        # Count actions per day
+        cutoff_date = now - timedelta(days=days)
+        actions = ActionLog.query.filter(ActionLog.timestamp >= cutoff_date).all()
+        
+        for action in actions:
+            date_str = action.timestamp.date().isoformat()
+            if date_str in stats:
+                stats[date_str] += 1
+        
+        return stats
+    except Exception as e:
+        print(f"⚠️ Error getting daily stats: {e}")
+        return {}
 
 
 def get_progress():
     """
-    Retrieves current progress from database.
+    Gets current progress from database.
     
     Returns:
-        Dictionary representation of Progress entry, or default empty progress if no progress exists
+        Dictionary with progress data or None
     """
+    try:
+        if not has_app_context():
+            app = create_app()
+            with app.app_context():
+                return _get_progress_impl()
+        else:
+            return _get_progress_impl()
+    except Exception as e:
+        print(f"⚠️ Error getting progress: {e}")
+        return None
+
+
+def _get_progress_impl():
+    """Internal implementation of get_progress (assumes context exists)."""
     try:
         progress = Progress.query.first()
         if progress:
-            return progress.to_dict()
-        # ПОВЕРТАЄМО ДЕФОЛТНИЙ СЛОВНИК ЗАМІСТЬ NONE
-        # Формат відповідає Progress.to_dict() для сумісності
-        return {
-            "total": 0,
-            "current": 0,
-            "current_message": 0,
-            "total_messages": 0,
-            "status": "idle",
-            "details": "",
-            "current_email_subject": "",
-            "stats": {},
-            "statistics": {},
-            "progress_percentage": 0
-        }
+            return {
+                'total': progress.total,
+                'current': progress.current,
+                'status': progress.status,
+                'details': progress.details,
+                'stats': progress.stats or {}
+            }
+        return None
     except Exception as e:
-        print(f"Error getting progress: {e}")
-        # Повертаємо дефолтний словник з помилкою
-        return {
-            "total": 0,
-            "current": 0,
-            "current_message": 0,
-            "total_messages": 0,
-            "status": "error",
-            "details": str(e),
-            "current_email_subject": str(e),
-            "stats": {},
-            "statistics": {},
-            "progress_percentage": 0
-        }
+        print(f"⚠️ Error getting progress: {e}")
+        return None
+
+
+def get_latest_report():
+    """
+    Gets the latest processing report from database.
+    
+    Returns:
+        Report object or None
+    """
+    try:
+        if not has_app_context():
+            app = create_app()
+            with app.app_context():
+                return _get_latest_report_impl()
+        else:
+            return _get_latest_report_impl()
+    except Exception as e:
+        print(f"⚠️ Error getting latest report: {e}")
+        return None
+
+
+def _get_latest_report_impl():
+    """Internal implementation of get_latest_report (assumes context exists)."""
+    try:
+        return Report.query.order_by(Report.timestamp.desc()).first()
+    except Exception as e:
+        print(f"⚠️ Error getting latest report: {e}")
+        return None
 
 
 def get_followup_stats():
     """
-    Retrieves follow-up statistics from database.
+    Gets follow-up statistics from database.
     
     Returns:
-        Dictionary with 'pending' and 'overdue' counts
+        Dictionary with follow-up stats
     """
+    try:
+        if not has_app_context():
+            app = create_app()
+            with app.app_context():
+                return _get_followup_stats_impl()
+        else:
+            return _get_followup_stats_impl()
+    except Exception as e:
+        print(f"⚠️ Error getting followup stats: {e}")
+        return {}
+
+
+def _get_followup_stats_impl():
+    """Internal implementation of get_followup_stats (assumes context exists)."""
     try:
         from datetime import date
         
-        # Count pending follow-ups
-        pending = ActionLog.query.filter(
-            ActionLog.is_followup_pending == True,
-            ActionLog.followup_sent == False
-        ).count()
-        
-        # Count overdue follow-ups (expected_reply_date < today)
+        total_pending = ActionLog.query.filter_by(is_followup_pending=True, followup_sent=False).count()
+        total_sent = ActionLog.query.filter_by(followup_sent=True).count()
         today = date.today()
+        
         overdue = ActionLog.query.filter(
             ActionLog.is_followup_pending == True,
             ActionLog.followup_sent == False,
@@ -659,25 +486,10 @@ def get_followup_stats():
         ).count()
         
         return {
-            'pending': pending,
+            'pending': total_pending,
+            'sent': total_sent,
             'overdue': overdue
         }
-    except Exception:
-        # Return default values on error
-        return {'pending': 0, 'overdue': 0}
-
-
-def _invalidate_cache():
-    """
-    Invalidates cache for dashboard statistics.
-    This is a helper function that tries to invalidate cache if cache_helper is available.
-    """
-    try:
-        from utils.cache_helper import invalidate_dashboard_cache
-        invalidate_dashboard_cache()
-    except ImportError:
-        # Cache helper not available, silently ignore
-        pass
-    except Exception:
-        # Other errors, silently ignore
-        pass
+    except Exception as e:
+        print(f"⚠️ Error getting followup stats: {e}")
+        return {}

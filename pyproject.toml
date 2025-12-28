@@ -1,0 +1,59 @@
+[tool.black]
+line-length = 127
+target-version = ['py311']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | venv
+  | env
+  | \.env
+  | __pycache__
+  | alembic/versions
+  | htmlcov
+  | instance
+  | frontend/node_modules
+)/
+'''
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "e2e: End-to-end tests (require running server)",
+    "slow: Slow running tests",
+    "no_mock_auth: Skip mock_google_auth fixture for this test",
+]
+
+[tool.coverage.run]
+source = ["."]
+omit = [
+    "*/tests/*",
+    "*/venv/*",
+    "*/.venv/*",
+    "*/env/*",
+    "*/__pycache__/*",
+    "*/alembic/versions/*",
+    "*/htmlcov/*",
+    "*/instance/*",
+    "*/frontend/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+

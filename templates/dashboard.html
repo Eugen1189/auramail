@@ -4,9 +4,35 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AuraMail 2.5 - Dashboard</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Tailwind custom configuration for dark theme
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        'bg-dark': '#0A0A0A',
+                        'card-dark': '#151515',
+                        'accent-blue': '#4A90E2',
+                        'accent-purple': '#9D4EDD',
+                        'accent-teal': '#00D4AA',
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Alpine.js CDN -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- HTMX CDN -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
+        /* Alpine.js x-cloak для приховування елементів до ініціалізації */
+        [x-cloak] { display: none !important; }
+        
         :root {
             --bg-color: #0A0A0A;
             --card-bg: #151515;
@@ -28,12 +54,8 @@
         }
 
         body {
-            background: var(--bg-color);
-            color: var(--text-main);
+            /* Tailwind classes will handle most styling */
             font-family: 'Inter', sans-serif;
-            min-height: 100vh;
-            position: relative;
-            overflow-x: hidden;
         }
 
         /* Animated background with glowing effects */
@@ -52,13 +74,7 @@
             pointer-events: none;
         }
 
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 30px 20px;
-            position: relative;
-            z-index: 1;
-        }
+        /* Container now uses Tailwind classes: max-w-7xl mx-auto px-5 py-8 relative z-10 */
 
         /* Header */
         header {
@@ -828,39 +844,41 @@
         }
     </style>
 </head>
-<body>
-    <div class="container">
-        <header>
-            <div class="logo">
-                <div class="logo-icon">A</div>
+<body class="bg-[#0A0A0A] text-white font-sans min-h-screen relative overflow-x-hidden">
+    <!-- Animated background with glowing effects -->
+    <div class="fixed inset-0 pointer-events-none z-0" style="background: radial-gradient(circle at 20% 50%, rgba(74, 144, 226, 0.15) 0%, transparent 50%), radial-gradient(circle at 80% 80%, rgba(157, 78, 221, 0.15) 0%, transparent 50%), radial-gradient(circle at 40% 20%, rgba(0, 212, 170, 0.1) 0%, transparent 50%);"></div>
+    <div class="container max-w-7xl mx-auto px-5 py-8 relative z-10">
+        <header class="flex justify-between items-center mb-10 pb-5 border-b border-white/10">
+            <div class="flex items-center gap-3 text-3xl font-bold text-white">
+                <div class="w-12 h-12 bg-gradient-to-br from-[#4A90E2] to-[#9D4EDD] rounded-xl flex items-center justify-center text-2xl font-bold text-white shadow-lg shadow-blue-500/30">A</div>
                 <span>AuraMail</span>
-                <span style="font-size: 14px; color: var(--text-secondary); margin-left: 10px;">2.5</span>
+                <span class="text-sm text-gray-400 ml-2.5">2.5</span>
             </div>
-            <div class="header-right">
-                <div style="display: flex; gap: 12px; align-items: center;">
+            <div class="flex items-center gap-5">
+                <div class="flex gap-3 items-center">
                     <!-- Export Buttons -->
-                    <button onclick="exportToCSV()" class="btn-export" title="Export to CSV">
+                    <button onclick="exportToCSV()" class="px-4 py-2.5 bg-blue-500/10 border border-blue-500/30 rounded-lg text-blue-400 text-sm font-semibold hover:bg-blue-500/20 transition-all" title="Export to CSV">
                         📊 CSV
                     </button>
-                    <button onclick="exportToPDF()" class="btn-export" title="Export to PDF">
+                    <button onclick="exportToPDF()" class="px-4 py-2.5 bg-blue-500/10 border border-blue-500/30 rounded-lg text-blue-400 text-sm font-semibold hover:bg-blue-500/20 transition-all" title="Export to PDF">
                         📄 PDF
                     </button>
-                    <button id="voiceSearchBtnHeader" class="btn-voice-search-header">
+                    <button id="voiceSearchBtnHeader" class="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-[#4A90E2] to-[#9D4EDD] border-none rounded-xl text-white text-sm font-semibold cursor-pointer transition-all hover:-translate-y-0.5 shadow-lg shadow-blue-500/20 hover:shadow-xl hover:shadow-blue-500/40">
                         🎤 Voice Search
                     </button>
                 </div>
-                <div id="audioVisualizer" class="audio-visualizer">
-                    <div class="visualizer-bar"></div>
-                    <div class="visualizer-bar"></div>
-                    <div class="visualizer-bar"></div>
-                    <div class="visualizer-bar"></div>
-                    <div class="visualizer-bar"></div>
-                    <div class="visualizer-bar"></div>
-                    <div class="visualizer-bar"></div>
-                    <div class="visualizer-bar"></div>
+                <div id="audioVisualizer" class="hidden flex items-center gap-1 h-8">
+                    <div class="w-1 bg-blue-400 rounded-full animate-pulse" style="animation-delay: 0s; height: 20px;"></div>
+                    <div class="w-1 bg-blue-400 rounded-full animate-pulse" style="animation-delay: 0.1s; height: 15px;"></div>
+                    <div class="w-1 bg-blue-400 rounded-full animate-pulse" style="animation-delay: 0.2s; height: 25px;"></div>
+                    <div class="w-1 bg-blue-400 rounded-full animate-pulse" style="animation-delay: 0.3s; height: 18px;"></div>
+                    <div class="w-1 bg-blue-400 rounded-full animate-pulse" style="animation-delay: 0.4s; height: 25px;"></div>
+                    <div class="w-1 bg-blue-400 rounded-full animate-pulse" style="animation-delay: 0.5s; height: 12px;"></div>
+                    <div class="w-1 bg-blue-400 rounded-full animate-pulse" style="animation-delay: 0.6s; height: 28px;"></div>
+                    <div class="w-1 bg-blue-400 rounded-full animate-pulse" style="animation-delay: 0.7s; height: 15px;"></div>
                 </div>
-                <div class="status-indicator">
-                    <div class="status-dot"></div>
+                <div class="flex items-center gap-2 text-xs text-green-500 px-3 py-1.5 bg-green-500/10 rounded-lg border border-green-500/30">
+                    <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                     <span>All systems green</span>
                 </div>
             </div>
@@ -869,107 +887,118 @@
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
-                    <div style="padding: 15px; margin-bottom: 20px; border-radius: 8px; background: rgba(255, 75, 75, 0.1); border: 1px solid rgba(255, 75, 75, 0.3); color: #FF4B4B;">
+                    <div x-data="{ show: true }" 
+                         x-show="show"
+                         x-transition:leave="transition ease-in duration-300"
+                         x-transition:leave-start="opacity-100"
+                         x-transition:leave-end="opacity-0"
+                         class="p-4 mb-5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-500 relative">
+                        <button @click="show = false" 
+                                class="absolute top-2 right-2 text-red-500 hover:text-red-700 transition-colors">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
                         {{ message | safe }}
                     </div>
                 {% endfor %}
             {% endif %}
         {% endwith %}
 
-        <div class="main-grid">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
             <!-- TIME SAVED Widget (Dashboard 2.0) -->
-            <div class="widget time-saved-widget">
-                <div class="widget-title">TIME & COST SAVINGS</div>
-                <div class="time-saved-subtitle">Last 30 Days</div>
-                <div id="roiDisplay" class="time-saved-value" style="font-size: 18px; margin-bottom: 10px;">
-                    Loading...
+            <div class="bg-[#151515] border border-white/10 rounded-2xl p-8 relative hover:border-white/20 transition-all time-saved-widget">
+                <div class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">TIME & COST SAVINGS</div>
+                <div class="text-xs text-gray-500 mb-4">Last 30 Days</div>
+                <div id="roiDisplay" class="text-5xl font-bold text-[#4A90E2] mb-5 leading-tight">
+                    <span class="text-2xl font-medium text-gray-400">Loading...</span>
                 </div>
-                <div class="time-chart-container">
+                <div class="mt-5 h-30 relative">
                     <canvas id="timeChart"></canvas>
                 </div>
-                <button class="btn-start-sorting" onclick="startSorting()" style="width: 100%; margin-top: 20px; padding: 14px 24px; background: linear-gradient(135deg, var(--accent-teal), var(--accent-purple)); border: none; border-radius: 12px; color: white; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.3s;">
+                <button onclick="startSorting()" class="w-full mt-5 py-3.5 px-6 bg-gradient-to-r from-[#00D4AA] to-[#9D4EDD] border-none rounded-xl text-white text-sm font-semibold cursor-pointer transition-all hover:shadow-lg hover:shadow-teal-500/30">
                     START SMART SORTING
                 </button>
             </div>
 
             <!-- ROI Widget (Dashboard 2.0) -->
-            <div class="widget" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px; padding: 24px;">
-                <div class="widget-title">ROI ANALYTICS</div>
-                <div id="roiMetrics" style="margin-top: 20px;">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                        <div style="text-align: center; padding: 15px; background: rgba(74, 144, 226, 0.1); border-radius: 12px;">
-                            <div style="font-size: 24px; font-weight: 700; color: var(--accent-blue);" id="hoursSaved">-</div>
-                            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Hours Saved</div>
+            <div class="bg-[#151515] border border-white/10 rounded-2xl p-6 relative hover:border-white/20 transition-all">
+                <div class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-5">ROI ANALYTICS</div>
+                <div id="roiMetrics" class="mt-5">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="text-center p-4 bg-blue-500/10 rounded-xl">
+                            <div class="text-2xl font-bold text-[#4A90E2]" id="hoursSaved">-</div>
+                            <div class="text-xs text-gray-400 mt-1">Hours Saved</div>
                         </div>
-                        <div style="text-align: center; padding: 15px; background: rgba(0, 212, 170, 0.1); border-radius: 12px;">
-                            <div style="font-size: 24px; font-weight: 700; color: var(--accent-teal);" id="costSaved">-</div>
-                            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Cost Saved (USD)</div>
+                        <div class="text-center p-4 bg-teal-500/10 rounded-xl">
+                            <div class="text-2xl font-bold text-[#00D4AA]" id="costSaved">-</div>
+                            <div class="text-xs text-gray-400 mt-1">Cost Saved (USD)</div>
                         </div>
-                        <div style="text-align: center; padding: 15px; background: rgba(157, 78, 221, 0.1); border-radius: 12px;">
-                            <div style="font-size: 24px; font-weight: 700; color: var(--accent-purple);" id="aiCost">-</div>
-                            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">AI Cost (USD)</div>
+                        <div class="text-center p-4 bg-purple-500/10 rounded-xl">
+                            <div class="text-2xl font-bold text-[#9D4EDD]" id="aiCost">-</div>
+                            <div class="text-xs text-gray-400 mt-1">AI Cost (USD)</div>
                         </div>
-                        <div style="text-align: center; padding: 15px; background: rgba(0, 200, 83, 0.1); border-radius: 12px;">
-                            <div style="font-size: 24px; font-weight: 700; color: var(--success);" id="netSavings">-</div>
-                            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Net Savings (USD)</div>
+                        <div class="text-center p-4 bg-green-500/10 rounded-xl">
+                            <div class="text-2xl font-bold text-[#00C853]" id="netSavings">-</div>
+                            <div class="text-xs text-gray-400 mt-1">Net Savings (USD)</div>
                         </div>
                     </div>
-                    <div style="margin-top: 20px; padding: 15px; background: rgba(255, 255, 255, 0.05); border-radius: 12px; text-align: center;">
-                        <div style="font-size: 20px; font-weight: 700; color: var(--accent-teal);" id="roiPercentage">-</div>
-                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">ROI Percentage</div>
+                    <div class="mt-5 p-4 bg-white/5 rounded-xl text-center">
+                        <div class="text-xl font-bold text-[#00D4AA]" id="roiPercentage">-</div>
+                        <div class="text-xs text-gray-400 mt-1">ROI Percentage</div>
                     </div>
                 </div>
             </div>
 
             <!-- FOLLOW-UP MONITOR Widget -->
-            <div class="widget followup-widget">
-                <div class="widget-title">FOLLOW-UP MONITOR</div>
-                <div class="followup-pending">PENDING: {{ followup_stats.pending }}</div>
-                <div class="followup-pending-label">Follow-ups awaiting response</div>
+            <div class="bg-[#151515] border border-white/10 rounded-2xl p-8 relative hover:border-white/20 transition-all followup-widget">
+                <div class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-5">FOLLOW-UP MONITOR</div>
+                <div class="text-4xl font-bold text-white mb-2.5">PENDING: {{ followup_stats.pending }}</div>
+                <div class="text-sm text-gray-400 mb-5">Follow-ups awaiting response</div>
                 {% if followup_stats.overdue > 0 %}
-                <div class="followup-overdue">{{ followup_stats.overdue }} OVERDUE</div>
+                <div class="text-2xl font-semibold text-[#FF4B4B] mb-5 p-2.5 bg-red-500/10 rounded-lg border-l-4 border-[#FF4B4B]">{{ followup_stats.overdue }} OVERDUE</div>
                 {% endif %}
-                <button class="btn-review-followups" onclick="window.location.href='/report'">
+                <button onclick="window.location.href='/report'" class="w-full py-3.5 px-6 bg-gradient-to-r from-[#4A90E2] to-[#9D4EDD] border-none rounded-xl text-white text-sm font-semibold cursor-pointer transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-blue-500/30">
                     REVIEW FOLLOW-UPS
                 </button>
             </div>
 
             <!-- ACTIVITY LOG Widget -->
-            <div class="widget activity-widget">
-                <div class="widget-title">ACTIVITY LOG</div>
-                <div class="activity-list">
+            <div class="bg-[#151515] border border-white/10 rounded-2xl p-8 relative hover:border-white/20 transition-all activity-widget col-span-1 md:col-span-2">
+                <div class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-5">ACTIVITY LOG</div>
+                <div class="flex flex-col gap-3 mt-5">
                     {% for action in recent_activities[:5] %}
-                    <div class="activity-item">
-                        {% set action_taken = action['action_taken'] if 'action_taken' in action else (action.action_taken if hasattr(action, 'action_taken') else '') %}
-                        {% set ai_category = action['ai_category'] if 'ai_category' in action else (action.ai_category if hasattr(action, 'ai_category') else '') %}
-                        {% set is_followup_pending = action['is_followup_pending'] if 'is_followup_pending' in action else (action.is_followup_pending if hasattr(action, 'is_followup_pending') else False) %}
-                        {% set subject = action['subject'] if 'subject' in action else (action.subject if hasattr(action, 'subject') else '') %}
+                    <div class="flex items-center gap-3 p-3.5 rounded-lg bg-white/5 transition-all hover:bg-white/10 hover:border-l-4 hover:border-[#4A90E2] border-l-4 border-transparent">
+                        {% set action_taken = action.action_taken | default('') %}
+                        {% set ai_category = action.ai_category | default('') %}
+                        {% set is_followup_pending = action.is_followup_pending | default(False) %}
+                        {% set subject = action.subject | default('') %}
                         {% if action_taken == 'ARCHIVE' or action_taken == 'ARCHIVED' %}
-                            <div class="activity-icon success">✓</div>
-                            <div class="activity-text">
-                                <strong>SUCCESS:</strong> {{ ai_category }} > ARCHIVED
+                            <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0 bg-green-500/20 text-green-400">✓</div>
+                            <div class="text-sm text-gray-300">
+                                <strong class="text-white">SUCCESS:</strong> {{ ai_category }} > ARCHIVED
                             </div>
                         {% elif action_taken and action_taken.startswith('MOVED') %}
-                            <div class="activity-icon success">✓</div>
-                            <div class="activity-text">
-                                <strong>SUCCESS:</strong> {{ ai_category }} > MOVED
+                            <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0 bg-green-500/20 text-green-400">✓</div>
+                            <div class="text-sm text-gray-300">
+                                <strong class="text-white">SUCCESS:</strong> {{ ai_category }} > MOVED
                             </div>
                         {% elif is_followup_pending %}
-                            <div class="activity-icon danger">!</div>
-                            <div class="activity-text">
-                                <strong>FOLLOW-UP PENDING:</strong> {{ subject[:50] }}{% if subject|length > 50 %}...{% endif %}
+                            <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0 bg-red-500/20 text-red-400">!</div>
+                            <div class="text-sm text-gray-300">
+                                <strong class="text-white">FOLLOW-UP PENDING:</strong> {{ subject[:50] }}{% if subject|length > 50 %}...{% endif %}
                             </div>
                         {% else %}
-                            <div class="activity-icon warning">⚙</div>
-                            <div class="activity-text">
-                                <strong>ROLLBACK:</strong> {{ subject[:50] }}{% if subject|length > 50 %}...{% endif %}
+                            <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0 bg-yellow-500/20 text-yellow-400">⚙</div>
+                            <div class="text-sm text-gray-300">
+                                <strong class="text-white">ROLLBACK:</strong> {{ subject[:50] }}{% if subject|length > 50 %}...{% endif %}
                             </div>
                         {% endif %}
                     </div>
                     {% else %}
-                    <div class="activity-item">
-                        <div class="activity-icon success">!</div>
-                        <div class="activity-text">No activity yet. Start sorting to see actions here.</div>
+                    <div class="flex items-center gap-3 p-3.5 rounded-lg bg-white/5">
+                        <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0 bg-green-500/20 text-green-400">!</div>
+                        <div class="text-sm text-gray-300">No activity yet. Start sorting to see actions here.</div>
                     </div>
                     {% endfor %}
                 </div>
@@ -978,31 +1007,31 @@
     </div>
 
     <!-- Voice Input Modal -->
-    <div id="voiceInputModal" class="voice-input-modal">
-        <div class="voice-input-content">
-            <button class="btn-close-voice-input" onclick="closeVoiceInput()">×</button>
-            <div class="voice-input-title">🎤 Voice Search</div>
-            <div id="voiceStatusMessage" class="voice-status-message">Click the microphone to start recording</div>
-            <div id="voiceVisualizer" class="voice-visualizer-container" style="display: none;">
-                <div class="voice-visualizer-bar"></div>
-                <div class="voice-visualizer-bar"></div>
-                <div class="voice-visualizer-bar"></div>
-                <div class="voice-visualizer-bar"></div>
-                <div class="voice-visualizer-bar"></div>
-                <div class="voice-visualizer-bar"></div>
-                <div class="voice-visualizer-bar"></div>
-                <div class="voice-visualizer-bar"></div>
-                <div class="voice-visualizer-bar"></div>
-                <div class="voice-visualizer-bar"></div>
+    <div id="voiceInputModal" class="hidden fixed inset-0 bg-black/85 backdrop-blur-md z-[2000] flex items-center justify-center">
+        <div class="bg-[#151515] border border-white/10 rounded-3xl p-10 w-[90%] max-w-md text-center shadow-2xl relative">
+            <button onclick="closeVoiceInput()" class="absolute top-5 right-5 bg-transparent border-none text-gray-400 text-3xl cursor-pointer p-1 rounded-lg hover:bg-white/10 hover:text-white transition-all leading-none">×</button>
+            <div class="text-2xl font-bold text-white mb-7">🎤 Voice Search</div>
+            <div id="voiceStatusMessage" class="text-sm text-gray-400 mb-5">Click the microphone to start recording</div>
+            <div id="voiceVisualizer" class="hidden flex justify-center items-center gap-1 h-15 my-7">
+                <div class="w-1 bg-gradient-to-b from-[#4A90E2] to-[#9D4EDD] rounded-sm animate-pulse" style="animation-delay: 0s; height: 12px;"></div>
+                <div class="w-1 bg-gradient-to-b from-[#4A90E2] to-[#9D4EDD] rounded-sm animate-pulse" style="animation-delay: 0.1s; height: 30px;"></div>
+                <div class="w-1 bg-gradient-to-b from-[#4A90E2] to-[#9D4EDD] rounded-sm animate-pulse" style="animation-delay: 0.2s; height: 50px;"></div>
+                <div class="w-1 bg-gradient-to-b from-[#4A90E2] to-[#9D4EDD] rounded-sm animate-pulse" style="animation-delay: 0.3s; height: 25px;"></div>
+                <div class="w-1 bg-gradient-to-b from-[#4A90E2] to-[#9D4EDD] rounded-sm animate-pulse" style="animation-delay: 0.4s; height: 40px;"></div>
+                <div class="w-1 bg-gradient-to-b from-[#4A90E2] to-[#9D4EDD] rounded-sm animate-pulse" style="animation-delay: 0.5s; height: 18px;"></div>
+                <div class="w-1 bg-gradient-to-b from-[#4A90E2] to-[#9D4EDD] rounded-sm animate-pulse" style="animation-delay: 0.6s; height: 45px;"></div>
+                <div class="w-1 bg-gradient-to-b from-[#4A90E2] to-[#9D4EDD] rounded-sm animate-pulse" style="animation-delay: 0.7s; height: 22px;"></div>
+                <div class="w-1 bg-gradient-to-b from-[#4A90E2] to-[#9D4EDD] rounded-sm animate-pulse" style="animation-delay: 0.8s; height: 35px;"></div>
+                <div class="w-1 bg-gradient-to-b from-[#4A90E2] to-[#9D4EDD] rounded-sm animate-pulse" style="animation-delay: 0.9s; height: 15px;"></div>
             </div>
-            <div id="voiceTranscriptDisplay" class="voice-transcript-display empty">
+            <div id="voiceTranscriptDisplay" class="voice-transcript-display empty min-h-[100px] p-4 bg-white/5 rounded-lg text-gray-400 text-sm mb-5">
                 Your transcribed text will appear here...
             </div>
-            <div id="voiceInputActions" class="voice-input-actions" style="display: none;">
-                <button class="btn-confirm-search" onclick="confirmVoiceSearch()">
+            <div id="voiceInputActions" class="hidden flex gap-3 justify-center">
+                <button onclick="confirmVoiceSearch()" class="py-3 px-6 bg-gradient-to-r from-[#00D4AA] to-[#9D4EDD] border-none rounded-xl text-white text-sm font-semibold cursor-pointer transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-teal-500/30">
                     ✓ Confirm Search
                 </button>
-                <button class="btn-retry-recording" onclick="retryRecording()">
+                <button onclick="retryRecording()" class="py-3 px-6 bg-transparent border border-white/10 rounded-xl text-gray-400 text-sm font-semibold cursor-pointer transition-all hover:border-[#4A90E2] hover:text-[#4A90E2] hover:bg-blue-500/10">
                     🔄 Retry
                 </button>
             </div>
@@ -1010,88 +1039,90 @@
     </div>
 
     <!-- Voice Search Results Modal -->
-    <div id="voiceResultsModal" class="voice-results-modal">
-        <div class="voice-results-content">
-            <div class="voice-results-header">
-                <div class="voice-results-title">VOICE SEARCH RESULTS</div>
-                <button class="btn-dismiss" onclick="closeVoiceResults()">×</button>
+    <div id="voiceResultsModal" class="hidden fixed inset-0 bg-black/85 backdrop-blur-md z-[2000] flex items-center justify-center">
+        <div class="bg-[#151515] border border-white/10 rounded-3xl p-8 w-[90%] max-w-2xl shadow-2xl">
+            <div class="flex justify-between items-center mb-6">
+                <div class="text-lg font-bold text-white uppercase tracking-wider">VOICE SEARCH RESULTS</div>
+                <button onclick="closeVoiceResults()" class="text-gray-400 text-3xl cursor-pointer p-1 rounded-lg hover:bg-white/10 hover:text-white transition-all leading-none">×</button>
             </div>
-            <div id="voiceResultsList">
+            <div id="voiceResultsList" class="max-h-[60vh] overflow-y-auto">
                 <!-- Results will be populated by JavaScript -->
             </div>
         </div>
     </div>
 
     <!-- Progress Modal -->
-    <div id="progressModal" class="modal-overlay">
-        <div class="modal-content">
-            <div class="spinner"></div>
-            <h2 style="margin-bottom: 10px;">AI працює...</h2>
+    <div id="progressModal" class="hidden fixed inset-0 bg-black/90 backdrop-blur-md z-[1000] flex items-center justify-center"
+         hx-get="/api/progress"
+         hx-trigger="every 2s"
+         hx-swap="none"
+         hx-on::after-request="updateProgressFromHTMX(event)">
+        <div class="bg-[#151515] border border-white/10 p-10 rounded-3xl w-[90%] max-w-md text-center shadow-2xl">
+            <div class="w-12 h-12 border-4 border-blue-500/30 rounded-full border-t-[#4A90E2] mx-auto mb-5 animate-spin"></div>
+            <h2 class="mb-2.5 text-xl font-bold text-white">AI працює...</h2>
             
-            <div class="status-text" id="statusText">Ініціалізація...</div>
-            <div class="detail-text" id="detailText">Підготовка до з'єднання з Gmail API</div>
+            <div class="text-white text-base mb-1 min-h-[24px]" id="statusText">Ініціалізація...</div>
+            <div class="text-gray-400 text-sm font-mono" id="detailText">Підготовка до з'єднання з Gmail API</div>
 
-            <div class="progress-container">
-                <div id="progressBar" class="progress-bar"></div>
+            <div class="bg-white/10 rounded-lg h-2.5 w-full my-5 overflow-hidden">
+                <div id="progressBar" class="bg-gradient-to-r from-[#00D4AA] to-[#4A90E2] h-full rounded-lg transition-all duration-300" style="width: 0%"></div>
             </div>
 
-            <div class="progress-stats">
+            <div class="flex justify-between text-sm text-gray-400 mb-2.5">
                 <span id="countText">0 / 0</span>
                 <span id="percentText">0%</span>
             </div>
 
             <!-- Детальна статистика по виконаній роботі -->
-            <div style="margin-top: 20px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; text-align: left;">
-                <div style="background: rgba(255,255,255,0.05); padding: 10px; border-radius: 8px;">
-                    <small style="color: var(--text-secondary)">Оброблено</small>
-                    <div id="statProcessed" style="font-weight: bold; font-size: 18px;">0</div>
+            <div class="mt-5 grid grid-cols-2 gap-2.5 text-left">
+                <div class="bg-white/5 p-2.5 rounded-lg">
+                    <small class="text-gray-400">Оброблено</small>
+                    <div id="statProcessed" class="font-bold text-lg">0</div>
                 </div>
-                <div style="background: rgba(255,75,75,0.1); padding: 10px; border-radius: 8px;">
-                    <small style="color: #BB86FC">Архівовано</small>
-                    <div id="statArchived" style="font-weight: bold; color: #BB86FC; font-size: 18px;">0</div>
+                <div class="bg-red-500/10 p-2.5 rounded-lg">
+                    <small class="text-[#BB86FC]">Архівовано</small>
+                    <div id="statArchived" class="font-bold text-[#BB86FC] text-lg">0</div>
                 </div>
-                <div style="background: rgba(74,144,226,0.1); padding: 10px; border-radius: 8px;">
-                    <small style="color: var(--text-secondary)">Важливі</small>
-                    <div id="statImportant" style="font-weight: bold; color: #4A90E2; font-size: 18px;">0</div>
+                <div class="bg-blue-500/10 p-2.5 rounded-lg">
+                    <small class="text-gray-400">Важливі</small>
+                    <div id="statImportant" class="font-bold text-[#4A90E2] text-lg">0</div>
                 </div>
-                <div style="background: rgba(255,167,38,0.1); padding: 10px; border-radius: 8px;">
-                    <small style="color: var(--text-secondary)">Потребують дії</small>
-                    <div id="statActionRequired" style="font-weight: bold; color: #FFA726; font-size: 18px;">0</div>
+                <div class="bg-yellow-500/10 p-2.5 rounded-lg">
+                    <small class="text-gray-400">Потребують дії</small>
+                    <div id="statActionRequired" class="font-bold text-[#FFA726] text-lg">0</div>
                 </div>
-                <div style="background: rgba(157,78,221,0.1); padding: 10px; border-radius: 8px;">
-                    <small style="color: var(--text-secondary)">Розсилки</small>
-                    <div id="statNewsletter" style="font-weight: bold; color: #9D4EDD; font-size: 18px;">0</div>
+                <div class="bg-purple-500/10 p-2.5 rounded-lg">
+                    <small class="text-gray-400">Розсилки</small>
+                    <div id="statNewsletter" class="font-bold text-[#9D4EDD] text-lg">0</div>
                 </div>
-                <div style="background: rgba(255,75,75,0.1); padding: 10px; border-radius: 8px;">
-                    <small style="color: var(--text-secondary)">Помилки</small>
-                    <div id="statErrors" style="font-weight: bold; color: #FF4B4B; font-size: 18px;">0</div>
+                <div class="bg-red-500/10 p-2.5 rounded-lg">
+                    <small class="text-gray-400">Помилки</small>
+                    <div id="statErrors" class="font-bold text-[#FF4B4B] text-lg">0</div>
                 </div>
             </div>
             
             <!-- Прогрес по роботі -->
-            <div style="margin-top: 15px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; border-left: 3px solid var(--accent-blue);">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                    <small style="color: var(--text-secondary)">Прогрес роботи</small>
-                    <small id="progressInfo" style="color: var(--accent-blue); font-weight: 600;">0 / 0</small>
+            <div class="mt-4 p-3 bg-white/5 rounded-lg border-l-4 border-[#4A90E2]">
+                <div class="flex justify-between items-center mb-1">
+                    <small class="text-gray-400">Прогрес роботи</small>
+                    <small id="progressInfo" class="text-[#4A90E2] font-semibold">0 / 0</small>
                 </div>
-                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;" id="progressDetails">
+                <div class="text-xs text-gray-400 mt-1" id="progressDetails">
                     Очікування початку обробки...
                 </div>
                 <!-- Поточний лист, який обробляється -->
-                <div id="currentEmailInfo" style="font-size: 11px; color: var(--text-secondary); margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.05); display: none;">
-                    <small style="color: var(--text-secondary); opacity: 0.7;">Поточний лист:</small>
-                    <div id="currentEmailSubject" style="color: var(--accent-blue); font-weight: 500; margin-top: 3px; word-break: break-word;"></div>
+                <div id="currentEmailInfo" class="text-[11px] text-gray-400 mt-2 pt-2 border-t border-white/5 hidden">
+                    <small class="text-gray-400 opacity-70">Поточний лист:</small>
+                    <div id="currentEmailSubject" class="text-[#4A90E2] font-medium mt-1 break-words"></div>
                 </div>
             </div>
             
-            <p id="waitingMessage" style="margin-top: 20px; font-size: 12px; color: #666;">Будь ласка, не закривайте цю сторінку.</p>
+            <p id="waitingMessage" class="mt-5 text-xs text-gray-500">Будь ласка, не закривайте цю сторінку.</p>
             
             <!-- Close button (hidden during processing, shown on completion) -->
             <button id="closeModalBtn" onclick="closeProgressModal()" 
-                    style="display: none; margin-top: 20px; padding: 10px 30px; 
-                           background: var(--accent-blue); color: white; border: none; 
-                           border-radius: 8px; cursor: pointer; font-weight: 600;
-                           transition: background 0.3s;">
+                    class="hidden mt-5 py-2.5 px-8 bg-[#4A90E2] text-white border-none 
+                           rounded-lg cursor-pointer font-semibold hover:bg-[#357ABD] transition-colors">
                 Ок
             </button>
         </div>
@@ -1118,7 +1149,7 @@
                 console.error('Progress modal not found');
                 return;
             }
-            modal.classList.add('active');
+            modal.classList.remove('hidden');
 
             fetch('/sort')
                 .then(response => response.json())
@@ -1127,13 +1158,13 @@
                         startPolling();
                     } else {
                         alert('Помилка запуску: ' + (data.message || 'Unknown error'));
-                        modal.classList.remove('active');
+                        modal.classList.add('hidden');
                     }
                 })
                 .catch(error => {
                     console.error('Error:', error);
                     alert('Помилка з\'єднання: ' + error.message);
-                    modal.classList.remove('active');
+                    modal.classList.add('hidden');
                 });
         }
         
@@ -1184,7 +1215,7 @@
 
         // Initialize Time Chart with Real Data
         function updateTimeChart(chartData) {
-            const timeCtx = document.getElementById('timeChart').getContext('2d');
+        const timeCtx = document.getElementById('timeChart').getContext('2d');
             
             if (window.timeChartInstance) {
                 window.timeChartInstance.destroy();
@@ -1309,16 +1340,16 @@
                     isRecording = true;
                     document.getElementById('voiceSearchBtnHeader').classList.add('recording');
                     document.getElementById('voiceSearchBtnHeader').textContent = '🔴 Recording...';
-                    document.getElementById('audioVisualizer').classList.add('active');
+                    document.getElementById('audioVisualizer').classList.remove('hidden');
                     
                     // Show modal and update status
-                    document.getElementById('voiceInputModal').classList.add('active');
+                    document.getElementById('voiceInputModal').classList.remove('hidden');
                     document.getElementById('voiceStatusMessage').textContent = 'Listening... Speak clearly';
                     document.getElementById('voiceStatusMessage').classList.add('recording');
-                    document.getElementById('voiceVisualizer').style.display = 'flex';
+                    document.getElementById('voiceVisualizer').classList.remove('hidden');
                     document.getElementById('voiceTranscriptDisplay').textContent = '';
                     document.getElementById('voiceTranscriptDisplay').classList.remove('empty');
-                    document.getElementById('voiceInputActions').style.display = 'none';
+                    document.getElementById('voiceInputActions').classList.add('hidden');
                 };
 
                 recognition.onresult = function(event) {
@@ -1379,13 +1410,13 @@
             finalTranscript = '';
             
             // Show input modal first
-            document.getElementById('voiceInputModal').classList.add('active');
+            document.getElementById('voiceInputModal').classList.remove('hidden');
             document.getElementById('voiceStatusMessage').textContent = 'Click the microphone to start recording';
             document.getElementById('voiceStatusMessage').classList.remove('recording');
-            document.getElementById('voiceVisualizer').style.display = 'none';
+            document.getElementById('voiceVisualizer').classList.add('hidden');
             document.getElementById('voiceTranscriptDisplay').textContent = 'Your transcribed text will appear here...';
             document.getElementById('voiceTranscriptDisplay').classList.add('empty');
-            document.getElementById('voiceInputActions').style.display = 'none';
+                    document.getElementById('voiceInputActions').classList.add('hidden');
 
             if (!recognition) {
                 initVoiceRecognition();
@@ -1408,10 +1439,10 @@
             }
             document.getElementById('voiceSearchBtnHeader').classList.remove('recording');
             document.getElementById('voiceSearchBtnHeader').textContent = '🎤 Voice Search';
-            document.getElementById('audioVisualizer').classList.remove('active');
+            document.getElementById('audioVisualizer').classList.add('hidden');
             
             // Hide visualizer in modal
-            document.getElementById('voiceVisualizer').style.display = 'none';
+            document.getElementById('voiceVisualizer').classList.add('hidden');
             
             // Update status message
             if (finalTranscript.trim() || currentTranscript.trim()) {
@@ -1420,7 +1451,7 @@
                 document.getElementById('voiceStatusMessage').classList.remove('recording');
                 document.getElementById('voiceTranscriptDisplay').textContent = transcript;
                 document.getElementById('voiceTranscriptDisplay').classList.remove('empty');
-                document.getElementById('voiceInputActions').style.display = 'flex';
+                document.getElementById('voiceInputActions').classList.remove('hidden');
                 currentTranscript = transcript;
             } else {
                 document.getElementById('voiceStatusMessage').textContent = 'No speech detected. Please try again.';
@@ -1444,7 +1475,7 @@
             finalTranscript = '';
             document.getElementById('voiceTranscriptDisplay').textContent = 'Your transcribed text will appear here...';
             document.getElementById('voiceTranscriptDisplay').classList.add('empty');
-            document.getElementById('voiceInputActions').style.display = 'none';
+                    document.getElementById('voiceInputActions').classList.add('hidden');
             
             if (recognition && !isRecording) {
                 try {
@@ -1460,18 +1491,18 @@
             if (isRecording) {
                 stopVoiceRecording();
             }
-            document.getElementById('voiceInputModal').classList.remove('active');
+            document.getElementById('voiceInputModal').classList.add('hidden');
             currentTranscript = '';
             finalTranscript = '';
         }
 
         function performVoiceSearch(query) {
             // Show loading state
-            document.getElementById('voiceInputModal').classList.add('active');
+            document.getElementById('voiceInputModal').classList.remove('hidden');
             document.getElementById('voiceStatusMessage').textContent = 'Searching... Please wait';
             document.getElementById('voiceStatusMessage').classList.remove('recording');
-            document.getElementById('voiceVisualizer').style.display = 'none';
-            document.getElementById('voiceInputActions').style.display = 'none';
+            document.getElementById('voiceVisualizer').classList.add('hidden');
+                    document.getElementById('voiceInputActions').classList.add('hidden');
 
             fetch('/voice/search', {
                 method: 'POST',
@@ -1510,14 +1541,14 @@
                     }, 2000);
                 } else {
                     document.getElementById('voiceStatusMessage').textContent = 'Error: ' + (data.message || 'Unknown error');
-                    document.getElementById('voiceInputActions').style.display = 'flex';
+                    document.getElementById('voiceInputActions').classList.remove('hidden');
                     console.error('Voice search error:', data.message);
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
                 document.getElementById('voiceStatusMessage').textContent = 'Connection error. Please try again.';
-                document.getElementById('voiceInputActions').style.display = 'flex';
+                document.getElementById('voiceInputActions').classList.remove('hidden');
             });
         }
 
@@ -1546,11 +1577,11 @@
                 list.appendChild(card);
             });
             
-            modal.classList.add('active');
+            modal.classList.remove('hidden');
         }
 
         function closeVoiceResults() {
-            document.getElementById('voiceResultsModal').classList.remove('active');
+            document.getElementById('voiceResultsModal').classList.add('hidden');
         }
 
         function rollbackEmail(msgId) {
@@ -1590,7 +1621,101 @@
             }
         });
 
+        // HTMX handler для оновлення progress через JSON API
+        function updateProgressFromHTMX(event) {
+            if (event.detail && event.detail.xhr && event.detail.xhr.responseText) {
+                try {
+                    const data = JSON.parse(event.detail.xhr.responseText);
+                    updateProgressUI(data);
+                } catch (e) {
+                    console.debug('HTMX progress update error:', e);
+                }
+            }
+        }
+        
+        // Функція для оновлення UI з даних (використовується і HTMX, і старим polling)
+        function updateProgressUI(data) {
+            if (!data || data.error) return;
+            
+            const currentProgress = data.current_message || data.current || 0;
+            const totalProgress = data.total_messages || data.total || 0;
+            const progressPercent = totalProgress > 0 ? Math.round((currentProgress / totalProgress) * 100) : 0;
+            
+            // Оновлюємо progress bar
+            const progressBar = document.getElementById('progressBar');
+            if (progressBar) progressBar.style.width = progressPercent + '%';
+            
+            // Оновлюємо текстові елементи
+            const percentText = document.getElementById('percentText');
+            if (percentText) percentText.innerText = progressPercent + '%';
+            
+            const countText = document.getElementById('countText');
+            if (countText) countText.innerText = `${currentProgress} / ${totalProgress}`;
+            
+            // Оновлюємо статус
+            if (data.status) {
+                const statusMap = {
+                    'running': 'AI працює...',
+                    'completed': 'Завершено!',
+                    'Completed': 'Ваша пошта вже в ідеальному порядку. AI відпочиває.',
+                    'error': 'Помилка',
+                    'idle': 'Очікування...'
+                };
+                const statusText = statusMap[data.status] || data.status;
+                const statusEl = document.getElementById('statusText');
+                if (statusEl) statusEl.innerText = statusText;
+            }
+            
+            // Оновлюємо деталі
+            if (data.details) {
+                const detailEl = document.getElementById('detailText');
+                if (detailEl) {
+                    let details = data.details;
+                    if (details.length > 50) details = details.substring(0, 50) + '...';
+                    detailEl.innerText = details;
+                }
+            }
+            
+            // Оновлюємо статистику
+            const stats = data.statistics || data.stats || {};
+            if (document.getElementById('statProcessed')) document.getElementById('statProcessed').innerText = stats.total_processed || 0;
+            if (document.getElementById('statArchived')) document.getElementById('statArchived').innerText = stats.archived || 0;
+            if (document.getElementById('statImportant')) document.getElementById('statImportant').innerText = stats.important || 0;
+            if (document.getElementById('statActionRequired')) document.getElementById('statActionRequired').innerText = stats.action_required || 0;
+            if (document.getElementById('statNewsletter')) document.getElementById('statNewsletter').innerText = stats.newsletter || 0;
+            if (document.getElementById('statErrors')) document.getElementById('statErrors').innerText = stats.errors || 0;
+            
+            // Оновлюємо progress info
+            const progressInfo = document.getElementById('progressInfo');
+            if (progressInfo) progressInfo.innerText = `${currentProgress} / ${totalProgress}`;
+            
+            const progressDetails = document.getElementById('progressDetails');
+            if (progressDetails) {
+                const remainingCount = Math.max(0, totalProgress - currentProgress);
+                if (totalProgress > 0) {
+                    if (currentProgress === 0) {
+                        progressDetails.innerText = 'Підготовка до обробки...';
+                    } else if (currentProgress < totalProgress) {
+                        progressDetails.innerText = `Залишилось обробити: ${remainingCount} листів`;
+                    } else {
+                        progressDetails.innerText = 'Всі листи оброблено!';
+                    }
+                }
+            }
+            
+            // Перевіряємо завершення
+            const isCompleted = data.status && (data.status.toLowerCase() === 'completed' || progressPercent >= 100);
+            if (isCompleted) {
+                const closeBtn = document.getElementById('closeModalBtn');
+                const waitingMsg = document.getElementById('waitingMessage');
+                if (closeBtn) closeBtn.classList.remove('hidden');
+                if (waitingMsg) waitingMsg.classList.add('hidden');
+            }
+        }
+        
         function startPolling() {
+            // HTMX тепер обробляє polling автоматично через hx-trigger="every 2s"
+            // Але залишаємо fallback для сумісності
             const pollInterval = setInterval(() => {
                 fetch('/api/progress')
                     .then(response => {
@@ -1623,7 +1748,7 @@
                             // Show completion message in details if status is Completed
                             if (data.status.toLowerCase() === 'completed' && !data.details) {
                                 document.getElementById('detailText').innerText = 'Ваша пошта вже в ідеальному порядку. AI відпочиває.';
-                            }
+                        }
                         }
                         
                         // Відображення поточного листа
@@ -1655,7 +1780,7 @@
                             // Приховуємо детальну інформацію, якщо немає деталей
                             if (currentEmailInfo) {
                                 currentEmailInfo.style.display = 'none';
-                            }
+                        }
                         }
 
                         // Оновлення детальної статистики по виконаній роботі
@@ -1732,11 +1857,11 @@
                             // Auto-close modal after 3 seconds (professional UX)
                             setTimeout(() => {
                                 const modal = document.getElementById('progressModal');
-                                modal.classList.remove('active');
+                                modal.classList.add('hidden');
                                 
                                 // Redirect to report page after closing modal
-                                setTimeout(() => {
-                                    window.location.href = '/report';
+                            setTimeout(() => {
+                                window.location.href = '/report';
                                 }, 500);
                             }, 3000); // 3 seconds delay for user to see completion message
                         }

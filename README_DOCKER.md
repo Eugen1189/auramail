@@ -325,3 +325,5 @@ For issues or questions:
 2. Verify configuration: `docker-compose config`
 3. Test health endpoints: `curl http://localhost:5000/health`
 
+
+

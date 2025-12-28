@@ -1,11 +1,11 @@
-version: '3.8'
+# version: '3.8'  # Obsolete in newer Docker Compose versions
 
 services:
   redis:
     image: redis:7-alpine
     container_name: auramail-redis
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${REDIS_PORT:-6380}:6379"  # Changed external port to 6380 to avoid conflict with local Redis
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
@@ -51,11 +51,17 @@ services:
       - CACHE_REDIS_URL=redis://redis:6379/1
       - DATABASE_URL=postgresql://${DB_USER:-auramail}:${DB_PASSWORD:-auramail_password}@db:5432/${DB_NAME:-auramail}
       - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-change-me-in-production}
+      - FLASK_APP=server:app
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - DEBUG=${DEBUG:-False}
-      - BASE_URI=${BASE_URI:-https://127.0.0.1:5000}
+      - DEBUG=${DEBUG:-True}
+      - BASE_URI=${BASE_URI:-http://localhost:5000}
       - FORCE_HTTPS=${FORCE_HTTPS:-False}
-      - ALLOW_ALL_CORS=${ALLOW_ALL_CORS:-False}
+      - ALLOW_ALL_CORS=${ALLOW_ALL_CORS:-True}
+      - TESTING=False
+      - DOCKER_DEV=True
+      - REDIS_URL=redis://redis:6379/0
+      - CACHE_REDIS_URL=redis://redis:6379/1
+      - RATELIMIT_STORAGE_URL=redis://redis:6379/2
     depends_on:
       redis:
         condition: service_healthy
@@ -85,6 +91,8 @@ services:
       - DATABASE_URL=postgresql://${DB_USER:-auramail}:${DB_PASSWORD:-auramail_password}@db:5432/${DB_NAME:-auramail}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-change-me-in-production}
+      - DEBUG=${DEBUG:-True}
+      - TESTING=False
     depends_on:
       redis:
         condition: service_healthy

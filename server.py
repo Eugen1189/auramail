@@ -5,7 +5,7 @@ Contains only Flask routes, authentication, and server startup.
 import os
 import sys
 import json
-from flask import redirect, url_for, session, request, render_template, flash, jsonify, make_response
+from flask import redirect, url_for, session, request, render_template, flash, jsonify
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 from redis import Redis
@@ -41,6 +41,13 @@ from config import (
     CACHE_ACTION_HISTORY_TIMEOUT
 )
 
+# 👇 Sentry Configuration - Define before usage 👇
+SENTRY_ENABLED = os.getenv('SENTRY_DSN') is not None
+if SENTRY_ENABLED:
+    print(f"🚀 Server Config: SENTRY_ENABLED={SENTRY_ENABLED}")
+
+# 👆 -------------------------------------------------- 👆
+
 # Import utility modules
 from utils.gmail_api import build_google_services, rollback_action
 from utils.db_logger import (
@@ -51,9 +58,10 @@ from utils.db_logger import (
     get_latest_report,
     get_followup_stats
 )
+from utils.analytics import calculate_roi, get_time_savings_chart_data, get_category_distribution
 
 # Import database
-from database import db, ActionLog
+from database import db
 
 # Import app factory
 from app_factory import create_app
@@ -65,19 +73,22 @@ from utils.logging_config import get_logger
 # Create Flask application using factory
 app = create_app()
 
+# Get cache instance from app (already initialized in app_factory)
 # Ensure cache is properly configured for testing
-# app_factory should have already set CACHE_TYPE='NullCache' if TESTING=True
-# This is a safety check to ensure cache configuration is correct
 if app.config.get('TESTING', False) and app.config.get('CACHE_TYPE') != 'NullCache':
     # Reconfigure cache to NullCache if not already set
     app.config['CACHE_TYPE'] = 'NullCache'
-    app.cache.init_app(app, config={
-        'CACHE_TYPE': 'NullCache',
-        'CACHE_NO_NULL_WARNING': True
-    })
+    app.config['CACHE_NO_NULL_WARNING'] = True
+    if hasattr(app, 'cache'):
+        app.cache.init_app(app, config={
+            'CACHE_TYPE': 'NullCache',
+            'CACHE_NO_NULL_WARNING': True
+        })
 
 # Get cache instance from app
-cache = app.cache
+cache = app.cache if hasattr(app, 'cache') else None
+if cache is None:
+    raise RuntimeError("Cache not initialized. Please check app_factory.py")
 
 # Initialize structured logging
 logger = get_logger(__name__)
@@ -119,66 +130,33 @@ def create_flow():
 
 
 def get_user_credentials():
-    """Get credentials from session and validate them."""
+    """Get credentials from session."""
     if 'credentials' not in session:
-        logger.debug("get_user_credentials: No credentials in session")
         return None
-    try:
-        credentials_json = session['credentials']
-        credentials = Credentials.from_authorized_user_info(json.loads(credentials_json), SCOPES)
-        
-        # Log credentials state for debugging
-        logger.debug(f"get_user_credentials: Credentials loaded. Expired: {credentials.expired}, Has refresh_token: {bool(credentials.refresh_token)}")
-        
-        # Check if credentials are valid
-        # Note: credentials.expired can be True even for valid tokens if they need refresh
-        # We should only clear if expired AND no refresh_token available
-        if credentials.expired:
-            if credentials.refresh_token:
-                # Credentials expired but can be refreshed - try to refresh
-                try:
-                    from google.auth.transport.requests import Request
-                    credentials.refresh(Request())
-                    # Update session with refreshed credentials
-                    session['credentials'] = credentials.to_json()
-                    session.permanent = True
-                    logger.info("Credentials refreshed successfully")
-                except Exception as refresh_error:
-                    logger.warning(f"Failed to refresh credentials: {refresh_error}")
-                    # If refresh fails, clear session
-                    session.pop('credentials', None)
-                    return None
-            else:
-                # Credentials expired and cannot be refreshed - clear session
-                logger.warning("Credentials expired and no refresh token available")
-                session.pop('credentials', None)
-                return None
-        
-        return credentials
-    except (ValueError, KeyError, json.JSONDecodeError) as e:
-        # Invalid credentials format - clear session
-        logger.warning(f"Invalid credentials in session: {e}")
-        session.pop('credentials', None)
-        return None
-    except Exception as e:
-        # Any other error - log and clear session
-        logger.error(f"Unexpected error getting credentials: {e}")
-        session.pop('credentials', None)
-        return None
+    credentials_json = session['credentials']
+    return Credentials.from_authorized_user_info(json.loads(credentials_json), SCOPES)
 
 
 def calculate_stats():
     """Calculate statistics from action history."""
     all_actions = get_action_history(limit=1000)
+    
+    # Helper function to get attribute value (works with both dict and object)
+    def get_attr(item, attr, default=None):
+        if isinstance(item, dict):
+            return item.get(attr, default)
+        else:
+            return getattr(item, attr, default)
+    
     return {
         'total_processed': len(all_actions),
-        'important': sum(1 for a in all_actions if a.get('ai_category') == 'IMPORTANT'),
-        'review': sum(1 for a in all_actions if a.get('ai_category') == 'REVIEW'),
-        'archived': sum(1 for a in all_actions if a.get('action_taken') in ('ARCHIVE', 'DELETE')),
-        'action_required': sum(1 for a in all_actions if a.get('ai_category') == 'ACTION_REQUIRED'),
-        'newsletter': sum(1 for a in all_actions if a.get('ai_category') == 'NEWSLETTER'),
-        'social': sum(1 for a in all_actions if a.get('ai_category') == 'SOCIAL'),
-        'errors': sum(1 for a in all_actions if str(a.get('status', '')).startswith('ERROR'))
+        'important': sum(1 for a in all_actions if get_attr(a, 'ai_category') == 'IMPORTANT'),
+        'review': sum(1 for a in all_actions if get_attr(a, 'ai_category') == 'REVIEW'),
+        'archived': sum(1 for a in all_actions if get_attr(a, 'action_taken') in ('ARCHIVE', 'DELETE')),
+        'action_required': sum(1 for a in all_actions if get_attr(a, 'ai_category') == 'ACTION_REQUIRED'),
+        'newsletter': sum(1 for a in all_actions if get_attr(a, 'ai_category') == 'NEWSLETTER'),
+        'social': sum(1 for a in all_actions if get_attr(a, 'ai_category') == 'SOCIAL'),
+        'errors': sum(1 for a in all_actions if str(get_attr(a, 'status', '')).startswith('ERROR'))
     }
 
 
@@ -256,14 +234,7 @@ def callback():
         session.permanent = True
         
         # Save token in session
-        credentials_json = credentials.to_json()
-        session['credentials'] = credentials_json
-        
-        # Force session to be saved immediately
-        session.modified = True
-        
-        # Log successful authorization for debugging
-        logger.info(f"OAuth callback successful. Credentials saved. Has refresh_token: {bool(credentials.refresh_token)}, Expired: {credentials.expired}")
+        session['credentials'] = credentials.to_json()
         
         # Verify scopes are granted
         if credentials.scopes:
@@ -275,14 +246,6 @@ def callback():
         
         # Remove state after successful authorization
         session.pop('oauth_state', None)
-        
-        # Ensure session is saved before redirect
-        try:
-            session.modified = True
-        except Exception:
-            pass
-        
-        logger.info("Redirecting to index after successful OAuth callback")
         return redirect(url_for('index'))
     except Exception as e:
         import traceback
@@ -290,35 +253,7 @@ def callback():
         return f'<h1>❌ Помилка при обробці токена</h1><p>Деталі: {str(e)}</p><pre>{error_details}</pre><p><a href="/">Повернутися на головну</a></p>', 500
 
 
-# --- 3. HEALTH CHECK ENDPOINT (for Docker/Kubernetes) ---
-@app.route('/health')
-def health():
-    """
-    Health check endpoint for Docker/Kubernetes.
-    Returns 200 OK if service is healthy.
-    """
-    try:
-        # Check Redis connection
-        redis_conn = Redis.from_url(REDIS_URL)
-        redis_conn.ping()
-        
-        # Check database connection
-        from database import db
-        db.session.execute(db.text('SELECT 1'))
-        
-        return jsonify({
-            'status': 'healthy',
-            'service': 'AuraMail',
-            'version': '1.0.0'
-        }), 200
-    except Exception as e:
-        return jsonify({
-            'status': 'unhealthy',
-            'error': str(e)
-        }), 503
-
-
-# --- 4. MAIN ROUTE (Home page) ---
+# --- 3. MAIN ROUTE (Home page) ---
 if app.config.get('TESTING'):
     @app.route('/')
     def index():
@@ -326,11 +261,6 @@ if app.config.get('TESTING'):
             return render_template('login.html')
         try:
             creds = get_user_credentials()
-            if not creds:
-                # Credentials invalid or missing - redirect to authorize
-                session.pop('credentials', None)  # Clear invalid credentials
-                return redirect(url_for('authorize'))
-            
             service, _ = build_google_services(creds)
             profile = service.users().getProfile(userId='me').execute()
             user_email = profile.get('emailAddress', 'Unknown')
@@ -339,71 +269,24 @@ if app.config.get('TESTING'):
             stats = calculate_stats()
             daily_stats = get_daily_stats(days=7)
             followup_stats = get_followup_stats()
-            
-            # Use LibrarianAgent to check dashboard state
-            from utils.agents import LibrarianAgent
-            dashboard_state = LibrarianAgent.check_dashboard_state(service)
-            
-            # Check for suspicious emails (Security Guard)
-            dangerous_emails = ActionLog.query.filter(
-                ActionLog.ai_category.in_(['DANGER', 'SPAM'])
-            ).count()
-            
             return render_template('dashboard.html',
                                    user_email=user_email,
                                    recent_activities=recent_activities,
                                    stats=stats,
                                    daily_stats=daily_stats,
-                                   followup_stats=followup_stats,
-                                   dashboard_state=dashboard_state,
-                                   dangerous_emails_count=dangerous_emails)
+                                   followup_stats=followup_stats)
         except Exception as e:
-            # If error occurs, clear credentials and redirect to authorize to prevent loop
-            logger.error(f"Error loading dashboard: {e}")
-            session.pop('credentials', None)  # Clear invalid credentials
-            return redirect(url_for('authorize'))
+            return f'<h1>❌ Помилка</h1><p>Деталі: {str(e)}</p><p><a href="/">Повернутися на головну</a></p>', 500
 else:
-    @app.route('/', methods=['GET'])
+    @app.route('/')
+    @cache.cached(timeout=CACHE_DASHBOARD_STATS_TIMEOUT, key_prefix='dashboard_index')
     def index():
-        """
-        Main dashboard route. Returns HTML dashboard page.
-        NOT a CSV export - ensure Content-Type is text/html.
-        """
-        # CRITICAL: Log that we're in the index route, not export
-        logger.info("INDEX ROUTE CALLED - Returning HTML dashboard, NOT CSV")
-        
-        # CRITICAL: Clear any cached responses that might be interfering
-        try:
-            if hasattr(app, 'cache'):
-                app.cache.clear()  # Clear entire cache
-                logger.debug("Cache cleared")
-        except Exception as e:
-            logger.warning(f"Cache clear failed: {e}")
-        
         if 'credentials' not in session:
-            logger.info("No credentials - showing login page")
-            response = make_response(render_template('login.html'))
-            response.headers['Content-Type'] = 'text/html; charset=utf-8'
-            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-            response.headers['Pragma'] = 'no-cache'
-            response.headers['Expires'] = '0'
-            return response
+            return render_template('login.html')
         
         # User is authenticated, show dashboard
         try:
-            # Log session state for debugging
-            has_credentials = 'credentials' in session
-            logger.debug(f"Index route: has_credentials in session: {has_credentials}")
-            
             creds = get_user_credentials()
-            if not creds:
-                # Credentials invalid or missing - redirect to authorize
-                logger.warning("Index route: No valid credentials found, redirecting to authorize")
-                session.pop('credentials', None)  # Clear invalid credentials
-                return redirect(url_for('authorize'))
-            
-            logger.debug("Index route: Valid credentials found, loading dashboard")
-            
             service, _ = build_google_services(creds)
             
             # Get user profile to extract email
@@ -423,57 +306,24 @@ else:
             # Get follow-up statistics
             followup_stats = get_followup_stats()
             
-            # Use LibrarianAgent to check dashboard state
-            from utils.agents import LibrarianAgent
-            dashboard_state = LibrarianAgent.check_dashboard_state(service)
-            
-            # Check for suspicious emails (Security Guard)
-            dangerous_emails = ActionLog.query.filter(
-                ActionLog.ai_category.in_(['DANGER', 'SPAM'])
-            ).count()
-            
-            # CRITICAL: Explicitly set Content-Type to HTML to prevent CSV download
-            logger.info("Rendering dashboard.html - Content-Type will be text/html")
-            response = make_response(render_template('dashboard.html', 
+            return render_template('dashboard.html', 
                                  user_email=user_email,
                                  recent_activities=recent_activities,
                                  stats=stats,
                                  daily_stats=daily_stats,
-                                 followup_stats=followup_stats,
-                                 dashboard_state=dashboard_state,
-                                 dangerous_emails_count=dangerous_emails))
-            response.headers['Content-Type'] = 'text/html; charset=utf-8'
-            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-            response.headers['Pragma'] = 'no-cache'
-            response.headers['Expires'] = '0'
-            logger.info(f"Response Content-Type: {response.headers.get('Content-Type')}")
-            return response
+                                 followup_stats=followup_stats)
         except Exception as e:
-            # If error occurs, clear credentials and redirect to authorize to prevent loop
-            logger.error(f"Error loading dashboard: {e}")
-            session.pop('credentials', None)  # Clear invalid credentials
-            flash('Сесія застаріла. Будь ласка, авторизуйтеся знову.', 'warning')
-            return redirect(url_for('authorize'))
+            # Fallback if there's an error
+            import traceback
+            error_details = traceback.format_exc()
+            logger.error(f"Error in index route: {str(e)}")
+            logger.error(f"Traceback: {error_details}")
+            return f'<h1>❌ Помилка</h1><p>Деталі: {str(e)}</p><pre>{error_details}</pre><p><a href="/">Повернутися на головну</a></p>', 500
 
 
 # --- 4. ОНОВЛЕНИЙ МАРШРУТ ЗАПУСКУ (тепер миттєвий) ---
 @app.route('/sort')
 def start_sort_job():
-    """
-    Starts email sorting task asynchronously via Redis RQ.
-    
-    NOTE: If you ever add synchronous sorting logic here (not recommended),
-    make sure to use includeSpamTrash=True in Gmail API messages().list() calls
-    to access SPAM and TRASH folders. Example:
-    
-        results = service.users().messages().list(
-            userId='me', 
-            labelIds=[folder_id], 
-            includeSpamTrash=True  # CRITICAL for SPAM/TRASH access
-        ).execute()
-    
-    Current implementation uses async worker (tasks.py) which already includes this.
-    """
     if 'credentials' not in session:
         return jsonify({'status': 'error', 'message': 'Not authorized'}), 401
     
@@ -489,7 +339,6 @@ def start_sort_job():
         # Ставимо задачу в чергу напряму
         # Worker will create Flask app context automatically via wrapper
         # Set timeout to 15 minutes (900 seconds) for long-running tasks (Gemini API, Gmail API)
-        # NOTE: background_sort_task in tasks.py already uses includeSpamTrash=True
         job = q.enqueue(background_sort_task, session['credentials'], job_timeout=900)
         
         return jsonify({
@@ -514,206 +363,16 @@ def start_sort_job():
         return jsonify({'status': 'error', 'message': error_msg}), 500
 
 
-# --- 4a. EXPORT ROUTES (CSV/PDF) ---
-@app.route('/export/csv', methods=['GET'])
-def export_csv():
-    """Експорт історії дій у CSV форматі з бази даних ActionLog."""
-    logger.info("EXPORT CSV ROUTE CALLED - This should only be called when user clicks export button")
-    if 'credentials' not in session:
-        return jsonify({'status': 'error', 'message': 'Not authorized'}), 401
-    
-    try:
-        import csv
-        import io
-        from flask import make_response
-        from datetime import datetime
-        
-        # Отримуємо всі записи з бази даних (нові first)
-        logs = ActionLog.query.order_by(ActionLog.timestamp.desc()).all()
-        
-        # Створюємо CSV у пам'яті
-        si = io.StringIO()
-        cw = csv.writer(si)
-        
-        # Заголовки
-        cw.writerow(['ID', 'Timestamp', 'Message ID', 'Subject', 'Category', 'Action', 'Reason', 'Follow-up Pending', 'Expected Reply Date'])
-        
-        # Дані
-        for log in logs:
-            cw.writerow([
-                log.id,
-                log.timestamp.strftime('%Y-%m-%d %H:%M:%S') if log.timestamp else '',
-                log.msg_id,
-                log.subject[:100] if log.subject else '',  # Limit subject length
-                log.ai_category,
-                log.action_taken,
-                log.reason[:200] if log.reason else '',  # Limit reason length
-                'Yes' if log.is_followup_pending else 'No',
-                log.expected_reply_date.strftime('%Y-%m-%d') if log.expected_reply_date else ''
-            ])
-        
-        output = make_response(si.getvalue())
-        filename = f'auramail_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
-        output.headers["Content-Disposition"] = f"attachment; filename={filename}"
-        output.headers["Content-type"] = "text/csv; charset=utf-8"
-        return output
-    except Exception as e:
-        logger.error(f"CSV Export Error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/export/pdf', methods=['GET'])
-def export_pdf():
-    """Експорт історії дій у PDF форматі з бази даних ActionLog."""
-    if 'credentials' not in session:
-        return jsonify({'status': 'error', 'message': 'Not authorized'}), 401
-    
-    try:
-        # Перевірка бібліотеки
-        try:
-            from reportlab.lib.pagesizes import letter
-            from reportlab.pdfgen import canvas
-            from reportlab.lib import colors
-            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
-            from reportlab.lib.styles import getSampleStyleSheet
-        except ImportError:
-            logger.error("reportlab is required for PDF export")
-            return jsonify({'error': 'Library reportlab not installed. Install with: pip install reportlab'}), 500
-
-        import io
-        from datetime import datetime
-        from flask import send_file
-        
-        # Отримуємо записи з бази даних (ліміт 100 для PDF щоб не був гігантським)
-        logs = ActionLog.query.order_by(ActionLog.timestamp.desc()).limit(100).all()
-        
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter)
-        elements = []
-        styles = getSampleStyleSheet()
-        
-        # Заголовок
-        elements.append(Paragraph("AuraMail Activity Report", styles['Title']))
-        elements.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles['Normal']))
-        elements.append(Paragraph(f"Total Records: {len(logs)}", styles['Normal']))
-        elements.append(Paragraph("<br/><br/>", styles['Normal']))
-        
-        # Таблиця
-        data = [['Time', 'Action', 'Category', 'Subject']]
-        for log in logs:
-            subj = log.subject[:40] + '...' if len(log.subject) > 40 else log.subject
-            time_str = log.timestamp.strftime('%Y-%m-%d %H:%M') if log.timestamp else 'N/A'
-            data.append([time_str, log.action_taken, log.ai_category, subj])
-        
-        t = Table(data, colWidths=[100, 80, 100, 300])
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('FONTSIZE', (0, 1), (-1, -1), 8),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
-        ]))
-        elements.append(t)
-        
-        doc.build(elements)
-        buffer.seek(0)
-        
-        filename = f'auramail_report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
-        return send_file(
-            buffer,
-            as_attachment=True,
-            download_name=filename,
-            mimetype='application/pdf'
-        )
-    except Exception as e:
-        logger.error(f"PDF Export Error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-
-# --- 4b. ANALYTICS API ENDPOINTS ---
-@app.route('/api/analytics/time-savings')
-def api_time_savings():
-    """Returns time savings analytics."""
-    if 'credentials' not in session:
-        return jsonify({'status': 'error', 'message': 'Not authorized'}), 401
-    
-    try:
-        days = int(request.args.get('days', 30))
-        from utils.analytics import calculate_time_savings
-        return jsonify(calculate_time_savings(days))
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-
-@app.route('/api/analytics/roi')
-def api_roi():
-    """Returns ROI analytics."""
-    if 'credentials' not in session:
-        return jsonify({'status': 'error', 'message': 'Not authorized'}), 401
-    
-    try:
-        days = int(request.args.get('days', 30))
-        from utils.analytics import calculate_roi
-        return jsonify(calculate_roi(days))
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-
-@app.route('/api/analytics/chart-data')
-def api_chart_data():
-    """Returns chart data for Dashboard 2.0."""
-    if 'credentials' not in session:
-        return jsonify({'status': 'error', 'message': 'Not authorized'}), 401
-    
-    try:
-        days = int(request.args.get('days', 30))
-        chart_type = request.args.get('type', 'time-savings')
-        
-        from utils.analytics import get_time_savings_chart_data, get_category_distribution
-        
-        if chart_type == 'time-savings':
-            return jsonify(get_time_savings_chart_data(days))
-        elif chart_type == 'category-distribution':
-            return jsonify(get_category_distribution(days))
-        else:
-            return jsonify({'status': 'error', 'message': 'Invalid chart type'}), 400
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-
-# --- 4c. REPORT ROUTE ---
+# --- 4b. НОВИЙ МАРШРУТ ДЛЯ ЗВІТУ ---
 @app.route('/report')
 @cache.cached(timeout=CACHE_ACTION_HISTORY_TIMEOUT, key_prefix='report_page')
 def show_report():
     # Завантажуємо статистику з бази даних
     try:
-        if 'credentials' not in session:
-            return redirect(url_for('authorize'))
-        
-        creds = get_user_credentials()
-        if not creds:
-            session.pop('credentials', None)
-            return redirect(url_for('authorize'))
-        
-        service, _ = build_google_services(creds)
-        
         stats = get_latest_report()
             
         recent_actions = get_action_history(limit=20)
         log_data = get_action_history(limit=100)
-        
-        # Use CleanerAgent to find deletable emails
-        from utils.agents import CleanerAgent
-        deletable_emails = CleanerAgent.find_deletable_emails(service, max_results=15)
         
         from config import is_production_ready
         
@@ -721,7 +380,6 @@ def show_report():
                              stats=stats, 
                              recent_actions=recent_actions, 
                              log_data=log_data,
-                             deletable_emails=deletable_emails,
                              is_prod_secure=is_production_ready())
     except Exception as e:
         return f'<h1>❌ Помилка звіту</h1><p>{str(e)}</p><p><a href="/">Повернутися на головну</a></p>', 500
@@ -739,6 +397,111 @@ def api_progress():
         return jsonify(progress_data)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# --- 5b. PROGRESS HTMX ENDPOINT (for real-time updates) ---
+@app.route('/api/progress/htmx')
+def api_progress_htmx():
+    """Returns progress data as HTML fragment for HTMX."""
+    try:
+        progress_data = get_progress()
+        if progress_data is None:
+            return '<div class="text-gray-400">No progress data</div>', 404
+        
+        current = progress_data.get('current', 0) or progress_data.get('current_message', 0)
+        total = progress_data.get('total', 0) or progress_data.get('total_messages', 0)
+        progress_percent = int((current / total * 100)) if total > 0 else 0
+        status = progress_data.get('status', 'idle')
+        details = progress_data.get('details', '')
+        stats = progress_data.get('stats', {}) or progress_data.get('statistics', {})
+        
+        # HTML fragment для HTMX
+        html = f'''
+        <div id="progressBar" class="bg-gradient-to-r from-[#00D4AA] to-[#4A90E2] h-full rounded-lg transition-all duration-300" style="width: {progress_percent}%"></div>
+        <div id="percentText" class="text-sm text-gray-400">{progress_percent}%</div>
+        <div id="countText" class="text-sm text-gray-400">{current} / {total}</div>
+        <div id="statusText" class="text-white text-base mb-1 min-h-[24px]">{status}</div>
+        <div id="detailText" class="text-gray-400 text-sm font-mono">{details[:50]}{'...' if len(details) > 50 else ''}</div>
+        <div id="statProcessed" class="font-bold text-lg">{stats.get('total_processed', 0)}</div>
+        <div id="statArchived" class="font-bold text-[#BB86FC] text-lg">{stats.get('archived', 0)}</div>
+        <div id="statImportant" class="font-bold text-[#4A90E2] text-lg">{stats.get('important', 0)}</div>
+        <div id="statActionRequired" class="font-bold text-[#FFA726] text-lg">{stats.get('action_required', 0)}</div>
+        <div id="statNewsletter" class="font-bold text-[#9D4EDD] text-lg">{stats.get('newsletter', 0)}</div>
+        <div id="statErrors" class="font-bold text-[#FF4B4B] text-lg">{stats.get('errors', 0)}</div>
+        <div id="progressInfo" class="text-[#4A90E2] font-semibold">{current} / {total}</div>
+        <div id="progressDetails" class="text-xs text-gray-400 mt-1">{details[:50]}{'...' if len(details) > 50 else ''}</div>
+        '''
+        
+        return html, 200, {'Content-Type': 'text/html'}
+    except Exception as e:
+        return f'<div class="text-red-500">Error: {str(e)}</div>', 500
+
+
+# --- 5b. ROI ANALYTICS ENDPOINT ---
+@app.route('/api/analytics/roi')
+def api_analytics_roi():
+    """Returns ROI analytics data for the dashboard."""
+    try:
+        # Get days parameter from query string (default: 30)
+        days = request.args.get('days', 30, type=int)
+        
+        # Validate days parameter
+        if days < 1 or days > 365:
+            days = 30  # Default to 30 if invalid
+        
+        # Calculate ROI
+        roi_data = calculate_roi(days=days)
+        
+        return jsonify(roi_data), 200
+    except Exception as e:
+        logger.error(f"Error calculating ROI: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'period_days': request.args.get('days', 30, type=int),
+            'cost_saved_usd': 0,
+            'ai_cost_usd': 0,
+            'net_savings_usd': 0,
+            'roi_percentage': 0,
+            'time_savings': {'emails_processed': 0, 'total_hours_saved': 0, 'cost_saved_usd': 0}
+        }), 500
+
+
+# --- 5c. CHART DATA ENDPOINT ---
+@app.route('/api/analytics/chart-data')
+def api_analytics_chart_data():
+    """Returns chart data for analytics visualization."""
+    try:
+        # Get parameters from query string
+        days = request.args.get('days', 30, type=int)
+        chart_type = request.args.get('type', 'time-savings', type=str)
+        
+        # Validate days parameter
+        if days < 1 or days > 365:
+            days = 30  # Default to 30 if invalid
+        
+        # Return appropriate chart data based on type
+        if chart_type == 'time-savings':
+            chart_data = get_time_savings_chart_data(days=days)
+        elif chart_type == 'category-distribution':
+            chart_data = get_category_distribution(days=days)
+        else:
+            # Default to time-savings if unknown type
+            chart_data = get_time_savings_chart_data(days=days)
+        
+        return jsonify(chart_data), 200
+    except Exception as e:
+        logger.error(f"Error getting chart data: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'labels': [],
+            'datasets': []
+        }), 500
 
 
 # --- 6. ROLLBACK ROUTE ---
@@ -861,72 +624,6 @@ def save_followup_credentials():
 def metrics():
     """Prometheus metrics endpoint."""
     return metrics_endpoint()
-
-
-# --- 10. ANALYTICS API ENDPOINTS (Dashboard 2.0) ---
-@app.route('/api/analytics/roi')
-def api_analytics_roi():
-    """Returns ROI analytics data."""
-    try:
-        from utils.analytics import calculate_roi
-        days = request.args.get('days', 30, type=int)
-        roi_data = calculate_roi(days)
-        return jsonify(roi_data)
-    except Exception as e:
-        logger.error(f"Error calculating ROI: {e}")
-        return jsonify({
-            'status': 'error',
-            'message': str(e),
-            'period_days': request.args.get('days', 30, type=int),
-            'cost_saved_usd': 0,
-            'ai_cost_usd': 0,
-            'net_savings_usd': 0,
-            'roi_percentage': 0
-        }), 500
-
-
-@app.route('/api/analytics/time-savings')
-def api_analytics_time_savings():
-    """Returns time savings analytics data."""
-    try:
-        from utils.analytics import calculate_time_savings
-        days = request.args.get('days', 30, type=int)
-        time_data = calculate_time_savings(days)
-        return jsonify(time_data)
-    except Exception as e:
-        logger.error(f"Error calculating time savings: {e}")
-        return jsonify({
-            'status': 'error',
-            'message': str(e),
-            'period_days': request.args.get('days', 30, type=int),
-            'emails_processed': 0,
-            'total_hours_saved': 0,
-            'cost_saved_usd': 0
-        }), 500
-
-
-@app.route('/api/analytics/chart-data')
-def api_analytics_chart_data():
-    """Returns chart data for time savings visualization."""
-    try:
-        from utils.analytics import get_time_savings_chart_data
-        days = request.args.get('days', 30, type=int)
-        chart_type = request.args.get('type', 'time-savings')
-        
-        if chart_type == 'time-savings':
-            chart_data = get_time_savings_chart_data(days)
-        else:
-            chart_data = {'labels': [], 'datasets': []}
-        
-        return jsonify(chart_data)
-    except Exception as e:
-        logger.error(f"Error generating chart data: {e}")
-        return jsonify({
-            'status': 'error',
-            'message': str(e),
-            'labels': [],
-            'datasets': []
-        }), 500
 
 
 # --- VOICE SEARCH ENDPOINT ---

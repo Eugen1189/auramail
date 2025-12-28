@@ -430,7 +430,7 @@ def _background_sort_task_impl(credentials_json):
 
         # Gemini клієнт зазвичай thread-safe, його можна передавати
         gemini_client = get_gemini_client()
-        
+
         # CRITICAL OPTIMIZATION: Batch AI Processing
         # Group emails into batches of 5-10 for single API call, reducing token costs by 20-30%
         # Check if batch processing is enabled (can be controlled via config)
@@ -518,26 +518,26 @@ def _background_sort_task_impl(credentials_json):
             # Fallback to parallel processing for small batches or if batch processing disabled
             print(f"⚡ [Worker] Using parallel processing for {len(new_messages)} emails...")
             completed_count = 0
-            
-            # Create Flask app instance to pass to threads
-            # Each thread needs its own app context
-            from app_factory import create_app
-            thread_app = create_app()
-            
-            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-                # ПЕРЕДАЄМО credentials_json, А НЕ service
-                # Also pass flask_app so each thread can create app context
-                # ВАЖЛИВО: Обробляємо тільки new_messages (вже відфільтровані LibrarianAgent)
-                future_to_msg = {
-                    executor.submit(
-                        process_single_email_task, 
-                        msg, 
-                        credentials_json,  # <--- Передаємо рядок JSON, щоб створити сервіс всередині
-                        gemini_client, 
-                        label_cache,
-                        thread_app  # Pass Flask app so thread can create context
-                    ): msg for msg in new_messages  # <--- Використовуємо new_messages замість unique_messages
-                }
+        
+        # Create Flask app instance to pass to threads
+        # Each thread needs its own app context
+        from app_factory import create_app
+        thread_app = create_app()
+        
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            # ПЕРЕДАЄМО credentials_json, А НЕ service
+            # Also pass flask_app so each thread can create app context
+            # ВАЖЛИВО: Обробляємо тільки new_messages (вже відфільтровані LibrarianAgent)
+            future_to_msg = {
+                executor.submit(
+                    process_single_email_task, 
+                    msg, 
+                    credentials_json,  # <--- Передаємо рядок JSON, щоб створити сервіс всередині
+                    gemini_client, 
+                    label_cache,
+                    thread_app  # Pass Flask app so thread can create context
+                ): msg for msg in new_messages  # <--- Використовуємо new_messages замість unique_messages
+            }
 
             for future in as_completed(future_to_msg):
                 completed_count += 1
@@ -594,7 +594,7 @@ def _background_sort_task_impl(credentials_json):
                 print(f"✅ [Redis Logger] Final flush: {flushed_count} entries written to database")
         except Exception as e:
             print(f"⚠️ [Redis Logger] Error during final flush: {e}")
-        
+
         # Update progress with final completion message before marking as complete
         total_processed = stats.get('total_processed', completed_count)
         success_count = total_processed - stats.get('errors', 0)
