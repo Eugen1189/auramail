@@ -240,7 +240,7 @@ class TestIndexRoute:
         # Тому приймаємо як 200/500 (успішна обробка помилки), так і 302 (якщо перенаправлення)
         assert response.status_code in [200, 500, 302]  # Accept all as the route may handle errors differently
         if response.status_code != 302:
-        data = response.get_data(as_text=True)
+            data = response.get_data(as_text=True)
             assert 'Помилка' in data or 'error' in data.lower() or 'dashboard' in data.lower()
 
 

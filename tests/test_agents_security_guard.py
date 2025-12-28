@@ -173,8 +173,8 @@ class TestSecurityGuardAgent:
             # If score is between 7-9, it will be SPAM (MEDIUM threat)
             # If score >= 10, it should be DANGER (HIGH threat)
             assert result['suspicious_score'] >= 10, f"Expected score >= 10, got {result['suspicious_score']}"
-                assert result['threat_level'] == 'HIGH'
-                assert result['category'] == 'DANGER'
+            assert result['threat_level'] == 'HIGH'
+            assert result['category'] == 'DANGER'
     
     def test_analyze_security_empty_content(self, app):
         """Test handling of empty email content."""
